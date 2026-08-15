@@ -1,0 +1,1087 @@
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+import openpyxl
+import unicodedata
+
+
+def money_format(valor):
+    valor_string = "{:,}".format(valor)
+
+    valor_string = valor_string.replace('.', '_')
+    valor_string = valor_string.replace(',', '.')
+    valor_string = valor_string.replace('_', ',')
+
+    return valor_string
+
+
+def normaliza_sigla(valor):
+    # Remove acentos, espaços nas pontas e diferenças de maiúsculas/minúsculas
+    # para tornar a comparação com a coluna "Sigla" da planilha de tarifas
+    # resistente a pequenas diferenças de formatação (ex.: "Enel CE" vs "ENEL CE").
+    texto = str(valor).strip().upper()
+    texto = unicodedata.normalize('NFKD', texto).encode('ascii', 'ignore').decode('ascii')
+    return texto
+
+
+@st.cache_data
+def carregar_planilha_tarifas(excel_file):
+    # Cacheado para não reler o Excel do disco a cada chamada de obter_tarifas()
+    banco = pd.read_excel(excel_file)
+    banco['Sigla_norm'] = banco['Sigla'].apply(normaliza_sigla)
+    return banco
+
+if "disabled" not in st.session_state:
+    st.session_state.disabled = False
+
+# Define the months for the first column
+months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro",
+          "Outubro", "Novembro", "Dezembro"]
+
+# Define the column headers
+columns = ["Meses", "Demanda na ponta", "Demanda Fora da Ponta", "Consumo na Ponta", "Consumo fora da ponta"]
+
+# Create the data for the DataFrame (the first column contains the months, and the rest are sequential numbers)
+data = [[months[i]] + [0.00 for j in range(4)] for i in range(12)]
+
+# Create the DataFrame with the specified columns
+dados_entrada = pd.DataFrame(data, columns=columns)
+
+# Entrada Inicial de Estados
+estados = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA","PB", "PE", "PI", "PR",
+           "RJ", "RN", "RO", "RR", "RS", "SC", "SP", "SE", "TO"]
+
+
+# Entrada Inicial de Concessionárias
+def selecionar_concessionaria(estado):
+    if estado == "AC":
+        concessionarias = ["Energisa Acre"]
+    elif estado == "AL":
+        concessionarias = ["Equatorial Alagoas"]
+    elif estado == "AP":
+        concessionarias = ["CEA"]
+    elif estado == "AM":
+        concessionarias = ["Amazonas S/A"]
+    elif estado == "BA":
+        concessionarias = ["COELBA"]
+    elif estado == "CE":
+        concessionarias = ["Enel CE"]
+    elif estado == "DF":
+        concessionarias = ["Neoenergia Brasília"]
+    elif estado == "ES":
+        concessionarias = ["EDP Escelsa", "ELFSM"]
+    elif estado == "GO":
+        concessionarias = ["Enel GO", "Cia. Hidroelétrica São Patrício"]
+    elif estado == "MA":
+        concessionarias = ["Equatorial Energia Maranhão"]
+    elif estado == "MT":
+        concessionarias = ["Energisa Mato Grosso"]
+    elif estado == "MS":
+        concessionarias = ["Energisa Mato Grosso do Sul"]
+    elif estado == "MG":
+        concessionarias = ["CEMIG", "Energisa MG", "DME Poços de Caldas"]
+    elif estado == "PA":
+        concessionarias = ["Equatorial Energia Pará", "CERGAPA"]
+    elif estado == "PB":
+        concessionarias = ["Energisa Paraíba"]
+    elif estado == "PE":
+        concessionarias = ["Neoenergia Pernambuco"]
+    elif estado == "PI":
+        concessionarias = ["Equatorial Piauí"]
+    elif estado == "PR":
+        concessionarias = ["COPEL", "COCEL", "Forcel", "Cooperativa Castro", "CERAL Arapoti"]
+    elif estado == "RJ":
+        concessionarias = ["Light", "Enel RJ", "Energisa Nova Friburgo", "CERAL Araruama", "CERCI Papucaia",
+                           "CERES"]
+    elif estado == "RN":
+        concessionarias = ["Neoenergia COSERN"]
+    elif estado == "RO":
+        concessionarias = ["CERON"]
+    elif estado == "RR":
+        concessionarias = ["Roraima Energia"]
+    elif estado == "RS":
+        concessionarias = ["CEEE", "RGE", "DEMEI Ijuí", "Hidropan", "Nova Palma Energia", "Eletrocar",
+                           "MuxEnergia", "Cooperativa Centro Jacuí", "CERFOX", "CERGAL", "Ceriluz", "Cermissões",
+                           "Certaja", "Certel", "Certhil", "Cooperluz", "Coopernorte", "Coopersul", "Coorsel", "Coprel",
+                           "Creluz-D", "Creral"]
+    elif estado == "SC":
+        concessionarias = ["CELESC", "Cooperaliança", "DCELT", "Força e Luz João Cesa", "EFLUL",
+                           "Cooperativa São Ludgero", "Cooperativa Jacinto Machado", "Cooperativa Praia Grande",
+                           "Cooperativa Ceraça", "CERBRA Norte", "CEREJ", "CERGRAL", "CERMOFUL", "CERPALO",
+                           "CERSAD", "Cersul", "Certrel", "Codesam", "Coopera", "Coopercocal", "Coopermila",
+                           "Cooperzem",
+                           "Iguaçu Energia"]
+    elif estado == "SP":
+        concessionarias = ["Enel SP", "CPFL", "CPFL Piratininga", "CPFL Santa Cruz", "Elektro",
+                           "Energisa Sul Sudeste", "EDP SP", "CEDRAP", "CEDRI", "CEMIRIM", "CERIM", "CERIPA", "CERMC",
+                           "CERNHE", "CERPRO", "CERRP", "Cervam", "Cetril", ]
+    elif estado == "SE":
+        concessionarias = ["Energisa Sergipe", "Sulgipe", "Cooperativa Centro Sul SE"]
+    elif estado == "TO":
+        concessionarias = ["Energisa Tocantins"]
+
+    return concessionarias
+
+
+def valor_ICMS(estado):
+    if estado == "AC":
+        icms = 0.17
+
+    elif estado == "AL":
+        icms = 0.17
+
+    elif estado == "AP":
+        icms = 0.18
+
+    elif estado == "AM":
+        icms = 0.18
+
+    elif estado == "BA":
+        icms = 0.18
+
+    elif estado == "CE":
+        icms = 0.18
+
+    elif estado == "DF":
+        icms = 0.18
+
+    elif estado == "ES":
+        icms = 0.17
+
+    elif estado == "GO":
+        icms = 0.17
+
+    elif estado == "MA":
+        icms = 0.18
+
+    elif estado == "MT":
+        icms = 0.17
+
+    elif estado == "MS":
+        icms = 0.17
+
+    elif estado == "MG":
+        icms = 0.18
+
+    elif estado == "PA":
+        icms = 0.17
+
+    elif estado == "PB":
+        icms = 0.18
+
+    elif estado == "PE":
+        icms = 0.18
+
+    elif estado == "PI":
+        icms = 0.18
+
+    elif estado == "PR":
+        icms = 0.18
+
+    elif estado == "RJ":
+        icms = 0.18
+
+    elif estado == "RN":
+        icms = 0.18
+
+    elif estado == "RO":
+        icms = 0.175
+
+    elif estado == "RR":
+        icms = 0.17
+
+    elif estado == "RS":
+        icms = 0.17
+
+    elif estado == "SC":
+        icms = 0.17
+
+    elif estado == "SP":
+        icms = 0.18
+
+    elif estado == "SE":
+        icms = 0.18
+
+    elif estado == "TO":
+        icms = 0.18
+
+    return icms
+
+
+def definir_sigla(value):
+    if value == "Amazonas S/A":
+        sigla = "AME"
+    elif value == "Cooperativa Castro":
+        sigla = "CASTRO-DIS"
+    elif value == "CEA":
+        sigla = "CEA"
+    elif value == "Equatorial Alagoas":
+        sigla = "Equatorial AL"
+    elif value == "Neoenergia Brasília":
+        sigla = "Neoenergia Brasília"
+    elif value == "CEDRAP":
+        sigla = "Cedrap"
+    elif value == "CEDRI":
+        sigla = "Cedri"
+    elif value == "CEEE":
+        sigla = "CEEE-D"
+    elif value == "Cooperativa São Ludgero":
+        sigla = "Cegero"
+    elif value == "Cooperativa Jacinto Machado":
+        sigla = "Cejama"
+    elif value == "CELESC":
+        sigla = "Celesc-DIS"
+    elif value == "Cooperativa Centro Jacuí":
+        sigla = "CELETRO"
+    elif value == "Equatorial Energia Pará":
+        sigla = "EQUATORIAL PA"
+    elif value == "Neoenergia Pernambuco":
+        sigla = "Neoenergia PE"
+    elif value == "Equatorial Energia Maranhão":
+        sigla = "Equatorial MA"
+    elif value == "CEMIG":
+        sigla = "Cemig-D"
+    elif value == "CEMIRIM":
+        sigla = "Cemirim"
+    elif value == "Equatorial Piauí":
+        sigla = "EQUATORIAL PI"
+    elif value == "Cooperativa Praia Grande":
+        sigla = "Ceprag"
+    elif value == "Cooperativa Ceraça":
+        sigla = "Ceraça"
+    elif value == "CERAL Araruama":
+        sigla = "CERAL ARARUAMA"
+    elif value == "CERAL Arapoti":
+        sigla = "CERAL-DIS"
+    elif value == "CERBRA Norte":
+        sigla = "Cerbranorte"
+    elif value == "CERCI Papucaia":
+        sigla = "CERCI"
+    elif value == "Cooperativa Centro Sul SE":
+        sigla = "Cercos"
+    elif value == "CEREJ":
+        sigla = "Cerej"
+    elif value == "CERES":
+        sigla = "Ceres"
+    elif value == "CERFOX":
+        sigla = "Cerfox"
+    elif value == "CERGAL":
+        sigla = "Cergal"
+    elif value == "CERGAPA":
+        sigla = "Cergapa"
+    elif value == "CERGRAL":
+        sigla = "Cergral"
+    elif value == "Ceriluz":
+        sigla = "Ceriluz"
+    elif value == "CERIM":
+        sigla = "Cerim"
+    elif value == "CERIPA":
+        sigla = "Ceripa"
+    elif value == "CERMC":
+        sigla = "CERMC"
+    elif value == "Cermissões":
+        sigla = "Cermissões"
+    elif value == "CERMOFUL":
+        sigla = "Cermoful"
+    elif value == "CERNHE":
+        sigla = "Cernhe"
+    elif value == "CERON":
+        sigla = "ERO"
+    elif value == "CERPALO":
+        sigla = "Cerpalo"
+    elif value == "CERPRO":
+        sigla = "Cerpro"
+    elif value == "CERRP":
+        sigla = "CERRP"
+    elif value == "CERSAD":
+        sigla = "CERSAD DISTRIBUIDORA"
+    elif value == "Cia. Hidroelétrica São Patrício":
+        sigla = "Chesp"
+    elif value == "COCEL":
+        sigla = "Cocel"
+    elif value == "COELBA":
+        sigla = "COELBA"
+    elif value == "COPEL":
+        sigla = "COPEL-DIS"
+    elif value == "Neoenergia COSERN":
+        sigla = "Cosern"
+    elif value == "CPFL":
+        sigla = "CPFL-PAULISTA"
+    elif value == "Enel SP":
+        sigla = "ELETROPAULO"
+    elif value == "DEMEI Ijuí":
+        sigla = "DEMEI"
+    elif value == "DME Poços de Caldas":
+        sigla = "DMED"
+    elif value == "Energisa Paraíba":
+        sigla = "EBO"
+    elif value == "EDP Escelsa":
+        sigla = "EDP ES"
+    elif value == "Força e Luz João Cesa":
+        sigla = "EFLJC"
+    elif value == "EFLUL":
+        sigla = "Eflul"
+    elif value == "Energisa Acre":
+        sigla = "EAC"
+    elif value == "Energisa MG":
+        sigla = "EMR"
+    elif value == "Energisa Mato Grosso do Sul":
+        sigla = "EMS"
+    elif value == "Energisa Mato Grosso":
+        sigla = "EMT"
+    elif value == "Energisa Nova Friburgo":
+        sigla = "ENF"
+    elif value == "Energisa Paraíba":
+        sigla = "EPB"
+    elif value == "Energisa Sergipe":
+        sigla = "ESE"
+    elif value == "Energisa Sul Sudeste":
+        sigla = "ESS"
+    elif value == "Energisa Tocantins":
+        sigla = "ETO"
+    elif value == "Iguaçu Energia":
+        sigla = "Ienergia"
+    elif value == "Nova Palma Energia":
+        sigla = "Uhenpal"
+    elif value == "Enel GO":
+        sigla = "EQUATORIAL GO"  # Enel GO foi rebatizada Equatorial Goiás
+    elif value == "Light":
+        sigla = "LIGHT SESA"
+    elif value == "Roraima Energia":
+        sigla = "Boa Vista"  # nome anterior da concessionária na base ANEEL
+    elif value == "Certel":
+        sigla = "CERTEL ENERGIA"
+    elif value == "CPFL Piratininga":
+        sigla = "CPFL-PIRATINING"
+    else:
+        sigla = (value)
+
+    return sigla
+
+st.set_page_config(page_title="Otimização de Demanda", page_icon=":zap:", layout="wide", initial_sidebar_state="auto", menu_items=None)
+
+with st.sidebar:
+    st.write("Programa desenvolvido com objetivo de otimizar a demanda dos clientes do Grupo A")
+    st.write("Em caso de dúvidas ou sugestões para melhoria, estou à disposição para contato")
+    st.write("Email: rodolfosixel@gmail.com")
+    st.write("---")
+    st.write("Desenvolvido por: Rodolfo Almeida Sixel Juliani")
+    st.write("---")
+    st.write("Versão 0.1 (Beta)")
+
+
+
+st.title("""Otimização de Demanda :zap:""")
+
+tab_dados, tab_tarifas, tab_simulacao = st.tabs(
+    ["1. Dados de Entrada", "2. Tarifas e Situação Atual", "3. Simulação e Resultados"]
+)
+
+with tab_dados:
+    st.header("""Entrada de dados""")
+
+    with st.expander(("Padrões para entrada de dados")):
+        st.markdown((
+            """
+            É possível copiar e colar as colunas do Excel diretamente na planilha abaixo.
+
+            É muito importante observar que o programa aceita apenas "." como separador decimal.
+
+            Sugere-se uma conferência dos dados após colagem.
+        """
+        ))
+
+    sample_data = [
+        {
+            "mes": months[0],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[1],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[2],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[3],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[4],
+            "demanda_ponta": 10.9,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[5],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[6],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[7],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[8],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[9],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[10],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+        {
+            "mes": months[11],
+            "demanda_ponta": 10,
+            "demanda_fora_ponta": 20,
+            "consumo_ponta": 300,
+            "consumo_fora_ponta": 2000,
+        },
+    ]
+
+    config = {
+        "mes": st.column_config.TextColumn("Mês", required=True),
+        "demanda_ponta": st.column_config.NumberColumn("Demanda na ponta"),
+        "demanda_fora_ponta": st.column_config.NumberColumn("Demanda fora da ponta"),
+        "consumo_ponta": st.column_config.NumberColumn("Consumo na ponta"),
+        "consumo_fora_ponta": st.column_config.NumberColumn("Consumo fora da ponta"),
+    }
+
+    dados_entrada_planilhas = st.data_editor(sample_data, column_config=config, num_rows="dynamic")
+
+vetor_demanda_ponta = []
+vetor_demanda_fp = []
+vetor_consumo_ponta= []
+vetor_consumo_fp = []
+
+for i in range (0, 12):
+    vetor_demanda_ponta.append(dados_entrada_planilhas[i]['demanda_ponta'])
+    vetor_demanda_fp.append(dados_entrada_planilhas[i]['demanda_fora_ponta'])
+    vetor_consumo_ponta.append(dados_entrada_planilhas[i]['consumo_ponta'])
+    vetor_consumo_fp.append(dados_entrada_planilhas[i]['consumo_fora_ponta'])
+
+demanda_maxima = max(vetor_demanda_fp)
+limite_demanda = 4*demanda_maxima
+
+
+def obter_tarifas(cor):
+    pis_cofins = 0.08  # valor padronizado de PIS e COFINS
+    estado = estado_selecionado  # estado selecionado pelo usuario
+    icms = valor_ICMS(estado)  # valor do ICMS para o estado selecionado
+
+    impostos = round(pis_cofins + icms, 2)  # valor de impostos total
+
+    impostos = 0
+
+    conc = concessionaria_selecionada
+    sigla = sigla_conc  # Sigla da concessionária
+    sigla_norm = normaliza_sigla(sigla)
+    grupo = 'A4'  # seleção do grupo de tarifação
+    # excel_file = 'Tarifas_atualizadas.xlsx'  # Nome da planilha padrão
+    excel_file = 'Tarifas_Teste_2025.xlsx'
+    banco = carregar_planilha_tarifas(excel_file)
+
+    try:
+        if cor == 'Verde':
+            # filtro para concessionária, grupo e modalidade tarifária
+            banco_novo = banco.loc[(banco['Sigla_norm'] == sigla_norm) & (banco['Subgrupo'] == grupo)
+                                   & (banco['Modalidade'] == 'Verde') & (banco['Detalhe'] == 'Não se aplica')
+                                   & (banco['Base Tarifária'] == 'Tarifa de Aplicação')]
+
+            # filtro para valores de energia fora da ponta
+            linha = banco_novo.loc[(banco_novo['Posto'] == 'Fora ponta') & (banco_novo['Unidade'] == 'MWh')]
+
+            # filtros e equação para determinar a tarifa de consumo fora da ponta (kWh) Tarifa = TE + TUSD
+            preco_consumo_fp = (1 + impostos) * (float(linha.iloc[0]['TUSD']) + float(linha.iloc[0]['TE'])) / 1000
+
+            # filtro para valores de energia na ponta
+            linha = banco_novo.loc[(banco_novo['Posto'] == 'Ponta') & (banco_novo['Unidade'] == 'MWh')]
+
+            # filtros e equação para determinar a tarifa de consumo na ponta (kWh) Tarifa = TE + TUSD
+            preco_consumo_ponta = (1 + impostos) * (
+                        float(linha.iloc[0]['TUSD']) + float(linha.iloc[0]['TE'])) / 1000
+
+            # filtro para valores de demanda (kW) > 'Não se aplica' é utilizado em Modalidade Verde
+            linha = banco_novo.loc[(banco_novo['Posto'] == 'Não se aplica') & (banco_novo['Unidade'] == 'kW')]
+
+            # filtros e equação para determinar a tarifa de demanda
+            preco_demanda_fp = (1 + impostos) * float(linha.iloc[0]['TUSD']) + float(linha.iloc[0]['TE'])
+
+            # Multa = 2 * preço
+            preco_demanda_ult_fp = 2 * preco_demanda_fp
+
+            # se a Modalidade é verde, então demanda na ponta = 0
+            preco_demanda_ponta = 0
+
+            # Multa = 2 * preço
+            preco_demanda_ult_ponta = 2 * preco_demanda_ponta
+
+        elif cor == 'Azul':
+            # filtro para concessionária, grupo e modalidade tarifária
+            banco_novo = banco.loc[(banco['Sigla_norm'] == sigla_norm) & (banco['Subgrupo'] == grupo)
+                                   & (banco['Modalidade'] == 'Azul') & (banco['Detalhe'] == 'Não se aplica')
+                                   & (banco['Base Tarifária'] == 'Tarifa de Aplicação')]
+
+            # filtro para valores de energia fora da ponta
+            linha = banco_novo.loc[(banco_novo['Posto'] == 'Fora ponta') & (banco_novo['Unidade'] == 'MWh')]
+
+            # filtros e equação para determinar a tarifa de consumo fora da ponta (kWh) Tarifa = TE + TUSD
+            preco_consumo_fp = round((1 + impostos) * (float(linha.iloc[0]['TUSD']) + float(linha.iloc[0]['TE'])) / 1000, 2)
+
+            # filtro para valores de energia na ponta
+            linha = banco_novo.loc[(banco_novo['Posto'] == 'Ponta') & (banco_novo['Unidade'] == 'MWh')]
+
+            # filtros e equação para determinar a tarifa de consumo na ponta (kWh) Tarifa = TE + TUSD
+            preco_consumo_ponta = round((1 + impostos) * (
+                        float(linha.iloc[0]['TUSD']) + float(linha.iloc[0]['TE'])) / 1000,2)
+
+            # filtro para valores de demanda (kW) fora da ponta
+            linha = banco_novo.loc[(banco_novo['Posto'] == 'Fora ponta') & (banco_novo['Unidade'] == 'kW')]
+
+            # filtros e equação para determinar a tarifa de demanda fora da ponta (kW) Tarifa = TE + TUSD
+            preco_demanda_fp = round((1 + impostos) * float(linha.iloc[0]['TUSD']) + float(linha.iloc[0]['TE']), 2)
+
+            # Multa = 2 * preço
+            preco_demanda_ult_fp = round(2 * preco_demanda_fp, 2)
+
+            # filtro para valores de demanda (kW) na ponta
+            linha = banco_novo.loc[(banco_novo['Posto'] == 'Ponta') & (banco_novo['Unidade'] == 'kW')]
+
+            # filtros e equação para determinar a tarifa de demanda na ponta (kW) Tarifa = TE + TUSD
+            preco_demanda_ponta = round((1 + impostos) * (float(linha.iloc[0]['TUSD']) + float(linha.iloc[0]['TE'])), 2)
+
+            # Multa = 2 * preço
+            preco_demanda_ult_ponta = round(2 * preco_demanda_ponta, 2)
+
+        else:  # definir os valores como zero caso a modalidade tarifária não tenha sido selecionada
+            preco_demanda_fp = 0
+            preco_demanda_ult_fp = 0
+            preco_demanda_ponta = 0
+            preco_demanda_ult_ponta = 0
+            preco_consumo_fp = 0
+            preco_consumo_ponta = 0
+
+    except (IndexError, KeyError):
+        st.error(
+            f"Não encontrei tarifas para **{conc}** (modalidade {cor}) na base de dados atual "
+            f"(`{excel_file}`). Isso normalmente significa que esta concessionária não tem tarifa "
+            f"Grupo A4 publicada nesta planilha. Selecione outra concessionária ou atualize a "
+            f"planilha de tarifas."
+        )
+        st.stop()
+
+    tarifas = [preco_demanda_fp, preco_demanda_ult_fp, preco_demanda_ponta, preco_demanda_ult_ponta,
+               preco_consumo_fp, preco_consumo_ponta]
+
+    return tarifas
+
+
+def custo_atual():
+    conc = concessionaria_selecionada
+    custo_total = 0
+    demanda_verde = float(demanda_contratada_verde)
+    demanda_azul = float(demanda_contratada_azul)
+
+    demanda_teste, demanda_contratada_teste = vetor_demanda_fp, demanda_verde  # receber valores de demanda
+    # vetor_consumo_fp, vetor_consumo_ponta = vetoreceber_valores_consumo()
+    demanda_ponta_teste, demanda_contratada_ponta_teste = vetor_demanda_ponta, demanda_azul
+
+    if modalidade == "Verde":
+        tarifa_vec = obter_tarifas(cor='Verde')  # definição de tarifas
+        valor_fp = objetivo_fp(tarifa_vec, demanda_teste, demanda_verde)
+        consumo, gasto_consumo_fp_verde, gasto_consumo_ponta_verde = gastos_consumo(tarifa_vec, vetor_consumo_fp,
+                                                                                    vetor_consumo_ponta)
+        custo_total = valor_fp + consumo
+        custo_demanda = valor_fp
+
+    elif modalidade == "Azul":
+        tarifa_vec = obter_tarifas(cor='Azul')
+        valor_fp = objetivo_fp(tarifa_vec, demanda_teste, demanda_verde)
+        valor_ponta = objetivo_ponta(tarifa_vec, demanda_ponta_teste, demanda_azul)
+        consumo, gasto_consumo_fp_azul, gasto_consumo_ponta_azul = gastos_consumo(tarifa_vec, vetor_consumo_fp,
+                                                                                  vetor_consumo_ponta)
+        custo_total = round(valor_fp + valor_ponta + consumo, 2)
+        custo_demanda = round(valor_fp + valor_ponta, 2)
+
+    return custo_total, custo_demanda
+
+
+gasto_anual = 30
+
+
+def objetivo_ponta(tarifas, vetor_demanda, x):
+    tarifa_ponta = tarifas[2]
+    multa_ponta = tarifas[3]
+    f_obj = 0
+    custo_demanda = 0
+    custo_multa = 0
+    vetor_demanda_ult_novo = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    obj = []
+
+    # preenchendo valores de demanda ultrapassada que geram multa
+    for i in range(0, 12):
+        if vetor_demanda[i] > 1.05 * x:
+            vetor_demanda_ult_novo[i] = vetor_demanda[i] - x
+        else:
+            vetor_demanda_ult_novo[i] = 0
+
+    for i in range(0, 12):
+        # 1 - demanda < contratada ⇨ sem multa e valor faturado é o contratado
+        if vetor_demanda[i] <= x:
+            f_obj += tarifa_ponta * x
+            obj.append(tarifa_ponta * x)
+            custo_demanda += tarifa_ponta * x
+
+        # 2 - demanda > 1.05 * contratada ⇨ com multa
+        elif vetor_demanda[i] > 1.05 * x:
+            f_obj += tarifa_ponta * vetor_demanda[i] + multa_ponta * vetor_demanda_ult_novo[i]
+            obj.append(tarifa_ponta * vetor_demanda[i] + multa_ponta * vetor_demanda_ult_novo[i])
+            custo_demanda += tarifa_ponta * vetor_demanda[i]
+            custo_multa += multa_ponta * vetor_demanda_ult_novo[i]
+
+        # 3 - demanda > contratada, mas não supera os 5% ⇨ sem multa e valor faturado é o medido
+        elif x < vetor_demanda[i] < 1.05 * x:
+            f_obj += tarifa_ponta * vetor_demanda[i]
+            obj.append(tarifa_ponta * vetor_demanda[i])
+            custo_demanda += tarifa_ponta * vetor_demanda[i]
+
+    return f_obj
+
+
+def objetivo_fp(tarifas, vetor_demanda, x):
+    tarifa_fp = tarifas[0]
+    multa_fp = tarifas[1]
+    f_obj = 0  # valor de custo anual
+    custo_demanda = 0
+    custo_multa = 0
+    vetor_demanda_ult_novo = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    obj = []
+
+    # criando vetor de demanda ultrapassada (caso seja 5% acima do valor contratado)
+    for i in range(0, 12):
+        if vetor_demanda[i] > 1.05 * x:
+            vetor_demanda_ult_novo[i] = vetor_demanda[i] - x
+        else:
+            vetor_demanda_ult_novo[i] = 0
+
+    for i in range(0, 12):  # adicionar os valores à função objetivo conforme a situação
+        # 1 - demanda < contratada ⇨ sem multa e valor faturado é o contratado
+        if vetor_demanda[i] <= x:
+            f_obj += tarifa_fp * x
+            obj.append(tarifa_fp * x)
+            custo_demanda += tarifa_fp * x
+
+        # 2 - demanda > 1.05 * contratada ⇨ com multa
+        elif vetor_demanda[i] > 1.05 * x:
+            f_obj += tarifa_fp * vetor_demanda[i] + multa_fp * vetor_demanda_ult_novo[i]
+            obj.append(tarifa_fp * vetor_demanda[i] + multa_fp * vetor_demanda_ult_novo[i])
+            custo_demanda += tarifa_fp * x
+            # custo_multa = multa_fp * vetor_demanda_ult_novo[i]
+
+        # 3 - demanda > contratada, mas não supera os 5% ⇨ sem multa e valor faturado é o medido
+        elif x < vetor_demanda[i] < 1.05 * x:
+            f_obj += tarifa_fp * vetor_demanda[i]
+            obj.append(tarifa_fp * vetor_demanda[i])
+            custo_demanda += tarifa_fp * x
+    return f_obj
+
+
+def gastos_consumo(tarifas, consumo_fp, consumo_ponta):
+    gasto_consumo_fp = 0
+    gasto_consumo_ponta = 0
+
+    for i in range(0, 12):
+        gasto_consumo_fp += tarifas[4] * consumo_fp[i]
+        gasto_consumo_ponta += tarifas[5] * consumo_ponta[i]
+
+    total = gasto_consumo_fp + gasto_consumo_ponta
+
+    return total, gasto_consumo_fp, gasto_consumo_ponta
+
+vec_otimo = []
+
+
+def varredura(a, b, demanda_contratada):
+    # Função para cálculo da melhor demanda utilizando busca extensiva por varredura
+    # A função roda por todos os valores definidos dentro dos limites (a,b) e checa o custo total para cada demanda
+    tarifas = obter_tarifas("Verde")
+
+    otimo_varredura = objetivo_fp(tarifas, vetor_demanda_fp, float(demanda_contratada))
+    demanda_otima = demanda_contratada
+    for x in range(a, b):
+        teste = objetivo_fp(tarifas, vetor_demanda_fp, x)
+        vec_otimo.append(teste)
+
+        if teste < otimo_varredura:
+            otimo_varredura = objetivo_fp(tarifas, vetor_demanda_fp, x)
+            demanda_otima = x
+
+    # plot_otimo_verde(vec_otimo,demanda_otima)
+    return otimo_varredura, demanda_otima
+
+
+def varredura_azul(a, b, demanda_contratada, demanda_contratada_azul):
+    # Função para cálculo da melhor demanda utilizando busca extensiva por varredura
+    # A função roda por todos os valores definidos dentro dos limites (a,b) e checa o custo total para cada demanda
+    tarifas = obter_tarifas("Verde")
+
+    otimo_varredura_fp = objetivo_fp(tarifas, vetor_demanda_fp, float(demanda_contratada))
+    demanda_otima_fp = demanda_contratada
+    for x in range(a, b):
+        teste = objetivo_fp(tarifas, vetor_demanda_fp, x)
+        if teste < otimo_varredura_fp:
+            otimo_varredura_fp = objetivo_fp(tarifas, vetor_demanda_fp, x)
+            demanda_otima_fp = x
+
+    tarifas = obter_tarifas("Azul")
+    otimo_varredura_ponta = objetivo_ponta(tarifas, vetor_demanda_ponta, float(demanda_contratada_azul))
+    demanda_otima_ponta = demanda_contratada_azul
+    for x in range(a, b):
+        teste = objetivo_ponta(tarifas, vetor_demanda_ponta, x)
+        if teste < otimo_varredura_ponta:
+            otimo_varredura_ponta = objetivo_ponta(tarifas, vetor_demanda_ponta, x)
+            demanda_otima_ponta = x
+
+    return otimo_varredura_fp, demanda_otima_fp, otimo_varredura_ponta, demanda_otima_ponta
+
+# Paleta categórica (skill de dataviz) validada com scripts/validate_palette.js
+# — ordem fixa por série, nunca redistribuída conforme os dados mudam.
+COR_SERIE_1 = "#2a78d6"  # azul
+COR_SERIE_2 = "#eb6834"  # laranja
+COR_SERIE_3 = "#1baf7a"  # verde-água
+COR_SERIE_4 = "#eda100"  # amarelo
+
+
+def plotar_verde(demanda_contratada, demanda_otima, demanda_fp, key="chart_verde"):
+    # Gráfico que compara demanda contratada atual, demanda ótima sugerida e demanda medida (Modalidade Verde)
+    demanda_contratada = float(demanda_contratada)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=months, y=[demanda_contratada] * 12, mode='lines', name='Demanda Atual',
+                              line=dict(color=COR_SERIE_1, dash='dash', width=3)))
+    fig.add_trace(go.Scatter(x=months, y=[demanda_otima] * 12, mode='lines', name='Demanda Sugerida',
+                              line=dict(color=COR_SERIE_2, width=3)))
+    fig.add_trace(go.Scatter(x=months, y=demanda_fp, mode='lines+markers', name='Demanda Medida',
+                              line=dict(color=COR_SERIE_3, dash='dashdot', width=3), marker=dict(size=8)))
+    fig.update_layout(
+        title='Simulação: Modalidade Tarifária Verde',
+        xaxis_title='Meses',
+        yaxis_title='Demanda de Potência (kW)',
+        hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+    )
+    st.plotly_chart(fig, width='stretch', key=key)
+
+
+def plotar_azul(demanda_contratada_ponta, demanda_otima_ponta, demanda_fp, key="chart_azul"):
+    # Gráfico que compara demanda contratada atual, demanda ótima sugerida e demanda medida (Modalidade Azul)
+    demanda_contratada_ponta = float(demanda_contratada_ponta)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=months, y=[demanda_contratada_ponta] * 12, mode='lines', name='Demanda na Ponta Atual',
+                              line=dict(color=COR_SERIE_1, dash='dash', width=3)))
+    fig.add_trace(go.Scatter(x=months, y=[demanda_otima_ponta] * 12, mode='lines', name='Demanda na Ponta Sugerida',
+                              line=dict(color=COR_SERIE_2, width=3)))
+    fig.add_trace(go.Scatter(x=months, y=demanda_fp, mode='lines+markers', name='Demanda Medida',
+                              line=dict(color=COR_SERIE_3, dash='dashdot', width=3), marker=dict(size=8)))
+    fig.update_layout(
+        title='Simulação: Modalidade Tarifária Azul',
+        xaxis_title='Meses',
+        yaxis_title='Demanda de Potência na Ponta (kW)',
+        hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+    )
+    st.plotly_chart(fig, width='stretch', key=key)
+
+
+def plotar_completo(demanda_total_verde, demanda_total_azul, gasto_consumo_fp_verde,
+                     gasto_consumo_ponta_verde, gasto_consumo_fp_azul, gasto_consumo_ponta_azul,
+                     key="chart_completo"):
+    # Comparação empilhada dos custos totais das modalidades Verde e Azul
+    categorias = ['Modalidade Verde', 'Modalidade Azul']
+    demanda_fp_vals = [demanda_total_verde, demanda_total_verde]
+    energia_fp_vals = [gasto_consumo_fp_verde, gasto_consumo_fp_azul]
+    demanda_ponta_vals = [0, demanda_total_azul]
+    energia_ponta_vals = [gasto_consumo_ponta_verde, gasto_consumo_ponta_azul]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(name='Demanda Fora Ponta', x=categorias, y=demanda_fp_vals, marker_color=COR_SERIE_1,
+                          text=[f"R$ {v:,.0f}" for v in demanda_fp_vals], textposition='inside'))
+    fig.add_trace(go.Bar(name='Energia Fora Ponta', x=categorias, y=energia_fp_vals, marker_color=COR_SERIE_2,
+                          text=[f"R$ {v:,.0f}" for v in energia_fp_vals], textposition='inside'))
+    fig.add_trace(go.Bar(name='Demanda Ponta', x=categorias, y=demanda_ponta_vals, marker_color=COR_SERIE_3,
+                          text=[f"R$ {v:,.0f}" for v in demanda_ponta_vals], textposition='inside'))
+    fig.add_trace(go.Bar(name='Energia Ponta', x=categorias, y=energia_ponta_vals, marker_color=COR_SERIE_4,
+                          text=[f"R$ {v:,.0f}" for v in energia_ponta_vals], textposition='inside'))
+    fig.update_layout(
+        barmode='stack',
+        title='Comparação de Custos',
+        yaxis_title='Valor Total (R$)',
+        hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+    )
+    st.plotly_chart(fig, width='stretch', key=key)
+
+
+with tab_tarifas:
+    st.header("Situação Atual e Importação de Tarifas")
+
+    with st.expander(("Passo a passo")):
+        st.markdown((
+            """
+            1. Selecionar modalidade tarifária
+
+            2. Inserir valores de demanda contratada
+
+            3. Selecionar o estado e a concessionária de interesse
+
+            4. Importar as tarifas (botão "Importar tarifas") da concessionária e checar os valores
+
+            5. Calcular o gasto anual (botão "Calcular gasto anual") atual da unidade consumidora
+        """
+        ))
+
+    coluna1, coluna2 = st.columns(2)
+
+    with coluna1:
+
+        modalidade = st.radio("Modalidade Tarifária", ["Azul", "Verde"])
+
+        disable = False
+
+        if modalidade == "Verde":
+            disable = True
+
+        demanda_contratada_verde = st.number_input(
+            "Demanda Contratada Fora da Ponta (kW):", min_value=0.0, value=0.0, step=1.0,
+            format="%.2f", key="dcfp"
+        )
+        demanda_contratada_azul = st.number_input(
+            "Demanda Contratada Ponta (kW):", min_value=0.0, value=0.0, step=1.0,
+            format="%.2f", disabled=disable, key="dcp"
+        )
+
+        options_selectbox1 = estados
+        estado_selecionado = st.selectbox("Selecione o estado", options_selectbox1, index=0)
+
+        options_selectbox2 = selecionar_concessionaria(estado_selecionado)
+        concessionaria_selecionada = st.selectbox("Selecione a concessionária", options_selectbox2, index=0)
+
+        icms = valor_ICMS(estado_selecionado)
+        sigla_conc = definir_sigla(concessionaria_selecionada)
+
+        demanda_fp_valor = 0
+
+    with coluna2:
+        if st.button("Importar tarifas :heavy_dollar_sign:", key="botao_tarifas"):
+            with st.spinner("Importando tarifas..."):
+                st.session_state["tarifas_verde"] = obter_tarifas("Verde")
+                st.session_state["tarifas_azul"] = obter_tarifas("Azul")
+
+        if "tarifas_verde" in st.session_state and "tarifas_azul" in st.session_state:
+            tarifas_verde = st.session_state["tarifas_verde"]
+            tarifas_azul = st.session_state["tarifas_azul"]
+
+            m1, m2 = st.columns(2)
+            m1.metric("Demanda Fora da Ponta (R$/kW)", f"{tarifas_verde[0]:.2f}")
+            m2.metric("Demanda Ponta Azul (R$/kW)", f"{tarifas_azul[2]:.2f}")
+
+            m3, m4, m5 = st.columns(3)
+            m3.metric("Consumo Fora da Ponta (R$/kWh)", f"{tarifas_verde[4]:.2f}")
+            m4.metric("Consumo Ponta Verde (R$/kWh)", f"{tarifas_verde[5]:.2f}")
+            m5.metric("Consumo Ponta Azul (R$/kWh)", f"{tarifas_azul[5]:.2f}")
+
+        st.write("---")
+
+        if st.button("Calcular gasto anual :dollar:"):
+            with st.spinner("Calculando..."):
+                custo_total, custo_demanda = custo_atual()
+                st.session_state["gasto_anual_demanda"] = custo_demanda
+
+        if "gasto_anual_demanda" in st.session_state:
+            gasto_string = money_format(round(st.session_state["gasto_anual_demanda"], 2))
+            st.metric("Gasto anual TUSD demanda", f"R$ {gasto_string}")
+
+
+with tab_simulacao:
+    st.header("""Simulação e Resultados :bar_chart: :moneybag:""")
+
+    with st.expander(("Como realizar as simulações")):
+        st.markdown((
+            """
+            O programa realizará as simulações de demanda contratada de acordo com os dados de entrada, exibindo a demanda ótima a ser contratada, a economia anual obtida e os gráficos de otimização.
+
+            Existem 3 possibilidades de simulação de acordo com o interesse do usuário:
+
+            1. Simular Verde: Otimização apenas da demanda fora da ponta.
+
+            2. Simular Azul: Otimização apenas da demanda na ponta.
+
+            3. Simulação Completa: Otimização da demanda fora da ponta e na ponta. O programa realiza o cálculo do custo total na modalidade azul e na modalidade verde e exibe a melhor opção.
+        """
+        ))
+
+    col_verde, col_azul, col_completo = st.columns(3)
+    simular_verde = col_verde.button("Simular Verde :large_green_square:", width='stretch')
+    simular_azul = col_azul.button("Simular Azul :large_blue_square:", width='stretch')
+    simular_completo = col_completo.button("Simular Completo :heavy_check_mark:", type="primary",
+                                            width='stretch')
+
+    if simular_verde:
+        with st.spinner("Calculando a demanda ótima (Modalidade Verde)..."):
+            valor_otimo, demanda_otima_verde = varredura(30, limite_demanda, demanda_contratada_verde)
+            custo_soma, custo_demanda = custo_atual()
+            economia_verde = custo_demanda - valor_otimo
+            st.session_state["resultado_verde"] = {
+                "valor_otimo": valor_otimo,
+                "demanda_otima": demanda_otima_verde,
+                "economia": economia_verde,
+                "demanda_fp": list(vetor_demanda_fp),
+                "demanda_contratada": demanda_contratada_verde,
+            }
+
+    if "resultado_verde" in st.session_state:
+        r = st.session_state["resultado_verde"]
+        st.write("---")
+        st.subheader("Resultado: Modalidade Verde")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Valor ótimo", f"R$ {money_format(round(r['valor_otimo'], 2))}")
+        c2.metric("Demanda sugerida (fora da ponta)", f"{r['demanda_otima']} kW")
+        c3.metric("Economia anual", f"R$ {money_format(round(r['economia'], 2))}", delta=round(r['economia'], 2))
+        plotar_verde(r["demanda_contratada"], r["demanda_otima"], r["demanda_fp"])
+
+    if simular_azul:
+        with st.spinner("Calculando a demanda ótima (Modalidade Azul)..."):
+            valor_otimo, demanda_otima_verde, valor_otimo_azul, demanda_otima_azul = \
+                varredura_azul(30, limite_demanda, demanda_contratada_verde, demanda_contratada_azul)
+
+            custo_soma, custo_demanda = custo_atual()
+            economia_azul = custo_demanda - valor_otimo
+            st.session_state["resultado_azul"] = {
+                "valor_otimo_azul": valor_otimo_azul,
+                "demanda_otima_azul": demanda_otima_azul,
+                "economia": economia_azul,
+                "demanda_ponta": list(vetor_demanda_ponta),
+                "demanda_contratada_azul": demanda_contratada_azul,
+            }
+
+    if "resultado_azul" in st.session_state:
+        r = st.session_state["resultado_azul"]
+        st.write("---")
+        st.subheader("Resultado: Modalidade Azul")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Valor ótimo", f"R$ {money_format(round(r['valor_otimo_azul'], 2))}")
+        c2.metric("Demanda sugerida (ponta)", f"{r['demanda_otima_azul']} kW")
+        c3.metric("Economia anual", f"R$ {money_format(round(r['economia'], 2))}", delta=round(r['economia'], 2))
+        plotar_azul(r["demanda_contratada_azul"], r["demanda_otima_azul"], r["demanda_ponta"])
+
+    if simular_completo:
+        with st.spinner("Calculando comparação completa (Verde x Azul)..."):
+            valor_otimo, demanda_otima_verde, valor_otimo_azul, demanda_otima_azul = \
+                varredura_azul(30, limite_demanda, demanda_contratada_verde, demanda_contratada_azul)
+
+            tarifas_verde = obter_tarifas("Verde")
+            total_verde, gasto_consumo_fp_verde, gasto_consumo_ponta_verde = \
+                gastos_consumo(tarifas_verde, vetor_consumo_fp, vetor_consumo_ponta)
+            custo_total_verde = valor_otimo + total_verde
+
+            tarifas_azul = obter_tarifas("Azul")
+            total_azul, gasto_consumo_fp_azul, gasto_consumo_ponta_azul = \
+                gastos_consumo(tarifas_azul, vetor_consumo_fp, vetor_consumo_ponta)
+            custo_total_azul = valor_otimo_azul + valor_otimo + total_azul
+
+            if custo_total_verde < custo_total_azul:
+                modalidade_sugerida = "Verde"
+                custo_otimo = custo_total_verde
+                demanda_sugerida_ponta = "-"
+            else:
+                modalidade_sugerida = "Azul"
+                custo_otimo = custo_total_azul
+                demanda_sugerida_ponta = demanda_otima_azul
+
+            custo_soma, custo_demanda = custo_atual()
+            economia = custo_soma - custo_otimo
+
+            st.session_state["resultado_completo"] = {
+                "custo_soma": custo_soma,
+                "custo_total_verde": custo_total_verde,
+                "custo_total_azul": custo_total_azul,
+                "demanda_otima_verde": demanda_otima_verde,
+                "demanda_sugerida_ponta": demanda_sugerida_ponta,
+                "modalidade_sugerida": modalidade_sugerida,
+                "economia": economia,
+                "demanda_otima_azul": demanda_otima_azul,
+                "gasto_consumo_fp_verde": gasto_consumo_fp_verde,
+                "gasto_consumo_ponta_verde": gasto_consumo_ponta_verde,
+                "gasto_consumo_fp_azul": gasto_consumo_fp_azul,
+                "gasto_consumo_ponta_azul": gasto_consumo_ponta_azul,
+                "valor_otimo": valor_otimo,
+                "valor_otimo_azul": valor_otimo_azul,
+                "demanda_fp": list(vetor_demanda_fp),
+                "demanda_ponta": list(vetor_demanda_ponta),
+                "demanda_contratada_verde": demanda_contratada_verde,
+                "demanda_contratada_azul": demanda_contratada_azul,
+            }
+
+    if "resultado_completo" in st.session_state:
+        r = st.session_state["resultado_completo"]
+        st.write("---")
+        st.subheader("Resultado: Comparação Completa")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Custo Atual", f"R$ {money_format(round(r['custo_soma'], 2))}")
+        c2.metric("Valor Total Verde", f"R$ {money_format(round(r['custo_total_verde'], 2))}")
+        c3.metric("Valor Total Azul", f"R$ {money_format(round(r['custo_total_azul'], 2))}")
+
+        c4, c5, c6 = st.columns(3)
+        c4.metric("Demanda Ótima Fora da Ponta", f"{r['demanda_otima_verde']} kW")
+        c5.metric("Demanda Ótima na Ponta", f"{r['demanda_sugerida_ponta']} kW")
+        c6.metric("Modalidade Sugerida", r["modalidade_sugerida"])
+
+        st.metric("Economia anual estimada", f"R$ {money_format(round(r['economia'], 2))}",
+                   delta=round(r['economia'], 2))
+
+        plotar_verde(r["demanda_contratada_verde"], r["demanda_otima_verde"], r["demanda_fp"],
+                     key="chart_completo_verde")
+        plotar_azul(r["demanda_contratada_azul"], r["demanda_otima_azul"], r["demanda_ponta"],
+                    key="chart_completo_azul")
+        plotar_completo(r["valor_otimo"], r["valor_otimo_azul"], r["gasto_consumo_fp_verde"],
+                         r["gasto_consumo_ponta_verde"], r["gasto_consumo_fp_azul"], r["gasto_consumo_ponta_azul"],
+                         key="chart_completo_comparativo")
