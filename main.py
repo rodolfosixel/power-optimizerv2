@@ -1,8 +1,24 @@
+import io
+from datetime import datetime
+
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import openpyxl
 import unicodedata
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import cm
+from reportlab.platypus import (
+    Image as RLImage,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 
 def money_format(valor):
@@ -615,6 +631,29 @@ def obter_tarifas(cor):
     return tarifas
 
 
+def obter_tarifas_efetivas(cor):
+    # Ponto único usado por todos os cálculos (custo atual, varreduras e simulações).
+    # Decide se as tarifas vêm da planilha ANEEL (obter_tarifas) ou dos campos digitados
+    # manualmente pelo usuário na aba "Tarifas e Situação Atual", conforme a opção
+    # "Origem das tarifas" selecionada ali.
+    if st.session_state.get("origem_tarifas") == "Inserir manualmente":
+        demanda_fp = st.session_state.get("man_demanda_fp", 0.0) or 0.0
+        demanda_ponta_azul = st.session_state.get("man_demanda_ponta_azul", 0.0) or 0.0
+        consumo_fp = st.session_state.get("man_consumo_fp", 0.0) or 0.0
+        consumo_ponta_verde = st.session_state.get("man_consumo_ponta_verde", 0.0) or 0.0
+        consumo_ponta_azul = st.session_state.get("man_consumo_ponta_azul", 0.0) or 0.0
+
+        if cor == "Verde":
+            return [demanda_fp, 2 * demanda_fp, 0, 0, consumo_fp, consumo_ponta_verde]
+        elif cor == "Azul":
+            return [demanda_fp, 2 * demanda_fp, demanda_ponta_azul, 2 * demanda_ponta_azul,
+                    consumo_fp, consumo_ponta_azul]
+        else:
+            return [0, 0, 0, 0, 0, 0]
+
+    return obter_tarifas(cor)
+
+
 def custo_atual():
     conc = concessionaria_selecionada
     custo_total = 0
@@ -626,7 +665,7 @@ def custo_atual():
     demanda_ponta_teste, demanda_contratada_ponta_teste = vetor_demanda_ponta, demanda_azul
 
     if modalidade == "Verde":
-        tarifa_vec = obter_tarifas(cor='Verde')  # definição de tarifas
+        tarifa_vec = obter_tarifas_efetivas(cor='Verde')  # definição de tarifas
         valor_fp = objetivo_fp(tarifa_vec, demanda_teste, demanda_verde)
         consumo, gasto_consumo_fp_verde, gasto_consumo_ponta_verde = gastos_consumo(tarifa_vec, vetor_consumo_fp,
                                                                                     vetor_consumo_ponta)
@@ -634,7 +673,7 @@ def custo_atual():
         custo_demanda = valor_fp
 
     elif modalidade == "Azul":
-        tarifa_vec = obter_tarifas(cor='Azul')
+        tarifa_vec = obter_tarifas_efetivas(cor='Azul')
         valor_fp = objetivo_fp(tarifa_vec, demanda_teste, demanda_verde)
         valor_ponta = objetivo_ponta(tarifa_vec, demanda_ponta_teste, demanda_azul)
         consumo, gasto_consumo_fp_azul, gasto_consumo_ponta_azul = gastos_consumo(tarifa_vec, vetor_consumo_fp,
@@ -743,7 +782,7 @@ vec_otimo = []
 def varredura(a, b, demanda_contratada):
     # Função para cálculo da melhor demanda utilizando busca extensiva por varredura
     # A função roda por todos os valores definidos dentro dos limites (a,b) e checa o custo total para cada demanda
-    tarifas = obter_tarifas("Verde")
+    tarifas = obter_tarifas_efetivas("Verde")
 
     otimo_varredura = objetivo_fp(tarifas, vetor_demanda_fp, float(demanda_contratada))
     demanda_otima = demanda_contratada
@@ -762,7 +801,7 @@ def varredura(a, b, demanda_contratada):
 def varredura_azul(a, b, demanda_contratada, demanda_contratada_azul):
     # Função para cálculo da melhor demanda utilizando busca extensiva por varredura
     # A função roda por todos os valores definidos dentro dos limites (a,b) e checa o custo total para cada demanda
-    tarifas = obter_tarifas("Verde")
+    tarifas = obter_tarifas_efetivas("Verde")
 
     otimo_varredura_fp = objetivo_fp(tarifas, vetor_demanda_fp, float(demanda_contratada))
     demanda_otima_fp = demanda_contratada
@@ -772,7 +811,7 @@ def varredura_azul(a, b, demanda_contratada, demanda_contratada_azul):
             otimo_varredura_fp = objetivo_fp(tarifas, vetor_demanda_fp, x)
             demanda_otima_fp = x
 
-    tarifas = obter_tarifas("Azul")
+    tarifas = obter_tarifas_efetivas("Azul")
     otimo_varredura_ponta = objetivo_ponta(tarifas, vetor_demanda_ponta, float(demanda_contratada_azul))
     demanda_otima_ponta = demanda_contratada_azul
     for x in range(a, b):
@@ -791,7 +830,13 @@ COR_SERIE_3 = "#1baf7a"  # verde-água
 COR_SERIE_4 = "#eda100"  # amarelo
 
 
-def plotar_verde(demanda_contratada, demanda_otima, demanda_fp, key="chart_verde"):
+# As três funções "construir_grafico_*" abaixo só MONTAM a figura Plotly e a devolvem —
+# não desenham nada na tela. São usadas tanto pela versão interativa (plotar_*, que
+# chama st.plotly_chart) quanto pelo relatório em PDF (que exporta a mesma figura como
+# imagem estática via kaleido). Isso garante que o gráfico Verde e o gráfico Azul sigam
+# sempre o mesmo padrão visual, tanto na tela quanto no PDF, porque nascem do mesmo código.
+
+def construir_grafico_verde(demanda_contratada, demanda_otima, demanda_fp):
     # Gráfico que compara demanda contratada atual, demanda ótima sugerida e demanda medida (Modalidade Verde)
     demanda_contratada = float(demanda_contratada)
     fig = go.Figure()
@@ -808,11 +853,11 @@ def plotar_verde(demanda_contratada, demanda_otima, demanda_fp, key="chart_verde
         hovermode='x unified',
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
     )
-    st.plotly_chart(fig, width='stretch', key=key)
+    return fig
 
 
-def plotar_azul(demanda_contratada_ponta, demanda_otima_ponta, demanda_fp, key="chart_azul"):
-    # Gráfico que compara demanda contratada atual, demanda ótima sugerida e demanda medida (Modalidade Azul)
+def construir_grafico_azul(demanda_contratada_ponta, demanda_otima_ponta, demanda_fp):
+    # Mesmo padrão visual do gráfico Verde (mesmas cores/traços/legenda), só troca o eixo
     demanda_contratada_ponta = float(demanda_contratada_ponta)
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=months, y=[demanda_contratada_ponta] * 12, mode='lines', name='Demanda na Ponta Atual',
@@ -828,12 +873,11 @@ def plotar_azul(demanda_contratada_ponta, demanda_otima_ponta, demanda_fp, key="
         hovermode='x unified',
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
     )
-    st.plotly_chart(fig, width='stretch', key=key)
+    return fig
 
 
-def plotar_completo(demanda_total_verde, demanda_total_azul, gasto_consumo_fp_verde,
-                     gasto_consumo_ponta_verde, gasto_consumo_fp_azul, gasto_consumo_ponta_azul,
-                     key="chart_completo"):
+def construir_grafico_completo(demanda_total_verde, demanda_total_azul, gasto_consumo_fp_verde,
+                                gasto_consumo_ponta_verde, gasto_consumo_fp_azul, gasto_consumo_ponta_azul):
     # Comparação empilhada dos custos totais das modalidades Verde e Azul
     categorias = ['Modalidade Verde', 'Modalidade Azul']
     demanda_fp_vals = [demanda_total_verde, demanda_total_verde]
@@ -857,7 +901,183 @@ def plotar_completo(demanda_total_verde, demanda_total_azul, gasto_consumo_fp_ve
         hovermode='x unified',
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
     )
+    return fig
+
+
+def plotar_verde(demanda_contratada, demanda_otima, demanda_fp, key="chart_verde"):
+    st.plotly_chart(construir_grafico_verde(demanda_contratada, demanda_otima, demanda_fp),
+                     width='stretch', key=key)
+
+
+def plotar_azul(demanda_contratada_ponta, demanda_otima_ponta, demanda_fp, key="chart_azul"):
+    st.plotly_chart(construir_grafico_azul(demanda_contratada_ponta, demanda_otima_ponta, demanda_fp),
+                     width='stretch', key=key)
+
+
+def plotar_completo(demanda_total_verde, demanda_total_azul, gasto_consumo_fp_verde,
+                     gasto_consumo_ponta_verde, gasto_consumo_fp_azul, gasto_consumo_ponta_azul,
+                     key="chart_completo"):
+    fig = construir_grafico_completo(demanda_total_verde, demanda_total_azul, gasto_consumo_fp_verde,
+                                      gasto_consumo_ponta_verde, gasto_consumo_fp_azul, gasto_consumo_ponta_azul)
     st.plotly_chart(fig, width='stretch', key=key)
+
+
+def fig_para_png(fig, width=900, height=480, scale=2):
+    # Exporta a MESMA figura (mesmo tamanho/escala para Verde e Azul) como PNG para uso no relatório PDF
+    return fig.to_image(format="png", width=width, height=height, scale=scale)
+
+
+ESTILO_TABELA_INFO = TableStyle([
+    ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f0efec")),
+    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#c9c8c2")),
+    ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+])
+
+ESTILO_TABELA_MENSAL = TableStyle([
+    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2a78d6")),
+    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+    ("FONTSIZE", (0, 0), (-1, -1), 8),
+    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#c9c8c2")),
+    ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7f7f5")]),
+    ("TOPPADDING", (0, 0), (-1, -1), 3),
+    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+])
+
+
+def _imagem_grafico(fig, largura_cm=16):
+    # Insere o gráfico Plotly no PDF preservando a mesma proporção usada em fig_para_png,
+    # para que os gráficos Verde e Azul sempre saiam do mesmo tamanho no relatório.
+    png_bytes = fig_para_png(fig)
+    largura = largura_cm * cm
+    altura = largura * (480 / 900)
+    return RLImage(io.BytesIO(png_bytes), width=largura, height=altura)
+
+
+def gerar_relatorio_pdf():
+    # Monta o relatório em PDF com os dados de entrada e os resultados das simulações
+    # que já foram calculadas nesta sessão (Verde, Azul e/ou Completa - o que estiver disponível).
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=2 * cm, rightMargin=2 * cm, topMargin=2 * cm, bottomMargin=2 * cm,
+    )
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph("Relatório de Otimização de Demanda", styles["Title"]))
+    story.append(Paragraph(f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles["Normal"]))
+    story.append(Spacer(1, 0.5 * cm))
+
+    # --- Dados de entrada ---
+    story.append(Paragraph("Dados de Entrada", styles["Heading2"]))
+    origem = st.session_state.get("origem_tarifas", "Importar da planilha (ANEEL)")
+    tabela_info = Table(
+        [
+            ["Estado", estado_selecionado],
+            ["Concessionária", concessionaria_selecionada],
+            ["Sigla (base de tarifas)", sigla_conc],
+            ["Modalidade tarifária selecionada", modalidade],
+            ["Origem das tarifas", origem],
+        ],
+        colWidths=[6 * cm, 9 * cm],
+    )
+    tabela_info.setStyle(ESTILO_TABELA_INFO)
+    story.append(tabela_info)
+    story.append(Spacer(1, 0.4 * cm))
+
+    # --- Dados mensais informados ---
+    story.append(Paragraph("Dados Mensais Informados", styles["Heading2"]))
+    linhas = [["Mês", "Demanda Ponta (kW)", "Demanda Fora Ponta (kW)", "Consumo Ponta (kWh)",
+               "Consumo Fora Ponta (kWh)"]]
+    for i in range(12):
+        linhas.append([
+            months[i],
+            f"{vetor_demanda_ponta[i]:g}",
+            f"{vetor_demanda_fp[i]:g}",
+            f"{vetor_consumo_ponta[i]:g}",
+            f"{vetor_consumo_fp[i]:g}",
+        ])
+    tabela_mensal = Table(linhas, colWidths=[2.6 * cm, 3.1 * cm, 3.4 * cm, 3.1 * cm, 3.4 * cm], repeatRows=1)
+    tabela_mensal.setStyle(ESTILO_TABELA_MENSAL)
+    story.append(tabela_mensal)
+
+    def secao_resultado(titulo, linhas_metricas, figuras):
+        story.append(PageBreak())
+        story.append(Paragraph(titulo, styles["Heading2"]))
+        tabela = Table(linhas_metricas, colWidths=[7 * cm, 8 * cm])
+        tabela.setStyle(ESTILO_TABELA_INFO)
+        story.append(tabela)
+        story.append(Spacer(1, 0.4 * cm))
+        for fig in figuras:
+            story.append(_imagem_grafico(fig))
+            story.append(Spacer(1, 0.3 * cm))
+
+    tem_resultado = False
+
+    if "resultado_verde" in st.session_state:
+        tem_resultado = True
+        r = st.session_state["resultado_verde"]
+        secao_resultado(
+            "Resultado: Modalidade Verde",
+            [
+                ["Valor ótimo", f"R$ {money_format(round(r['valor_otimo'], 2))}"],
+                ["Demanda sugerida (fora da ponta)", f"{r['demanda_otima']} kW"],
+                ["Economia anual estimada", f"R$ {money_format(round(r['economia'], 2))}"],
+            ],
+            [construir_grafico_verde(r["demanda_contratada"], r["demanda_otima"], r["demanda_fp"])],
+        )
+
+    if "resultado_azul" in st.session_state:
+        tem_resultado = True
+        r = st.session_state["resultado_azul"]
+        secao_resultado(
+            "Resultado: Modalidade Azul",
+            [
+                ["Valor ótimo", f"R$ {money_format(round(r['valor_otimo_azul'], 2))}"],
+                ["Demanda sugerida (ponta)", f"{r['demanda_otima_azul']} kW"],
+                ["Economia anual estimada", f"R$ {money_format(round(r['economia'], 2))}"],
+            ],
+            [construir_grafico_azul(r["demanda_contratada_azul"], r["demanda_otima_azul"], r["demanda_ponta"])],
+        )
+
+    if "resultado_completo" in st.session_state:
+        tem_resultado = True
+        r = st.session_state["resultado_completo"]
+        fig_verde = construir_grafico_verde(r["demanda_contratada_verde"], r["demanda_otima_verde"], r["demanda_fp"])
+        fig_azul = construir_grafico_azul(r["demanda_contratada_azul"], r["demanda_otima_azul"], r["demanda_ponta"])
+        fig_comp = construir_grafico_completo(
+            r["valor_otimo"], r["valor_otimo_azul"], r["gasto_consumo_fp_verde"],
+            r["gasto_consumo_ponta_verde"], r["gasto_consumo_fp_azul"], r["gasto_consumo_ponta_azul"],
+        )
+        secao_resultado(
+            "Resultado: Comparação Completa (Verde x Azul)",
+            [
+                ["Custo Atual", f"R$ {money_format(round(r['custo_soma'], 2))}"],
+                ["Valor Total Verde", f"R$ {money_format(round(r['custo_total_verde'], 2))}"],
+                ["Valor Total Azul", f"R$ {money_format(round(r['custo_total_azul'], 2))}"],
+                ["Demanda Ótima Fora da Ponta", f"{r['demanda_otima_verde']} kW"],
+                ["Demanda Ótima na Ponta", f"{r['demanda_sugerida_ponta']} kW"],
+                ["Modalidade Sugerida", r["modalidade_sugerida"]],
+                ["Economia anual estimada", f"R$ {money_format(round(r['economia'], 2))}"],
+            ],
+            [fig_verde, fig_azul, fig_comp],
+        )
+
+    if not tem_resultado:
+        story.append(Spacer(1, 0.4 * cm))
+        story.append(Paragraph(
+            "Nenhuma simulação foi executada nesta sessão ainda — rode ao menos uma simulação "
+            "na aba \"Simulação e Resultados\" antes de gerar o relatório.",
+            styles["Normal"],
+        ))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 with tab_tarifas:
@@ -872,7 +1092,8 @@ with tab_tarifas:
 
             3. Selecionar o estado e a concessionária de interesse
 
-            4. Importar as tarifas (botão "Importar tarifas") da concessionária e checar os valores
+            4. Obter as tarifas: importar automaticamente (botão "Importar tarifas") ou, se preferir,
+            selecionar "Inserir manualmente" e digitar os valores diretamente
 
             5. Calcular o gasto anual (botão "Calcular gasto anual") atual da unidade consumidora
         """
@@ -910,23 +1131,52 @@ with tab_tarifas:
         demanda_fp_valor = 0
 
     with coluna2:
-        if st.button("Importar tarifas :heavy_dollar_sign:", key="botao_tarifas"):
-            with st.spinner("Importando tarifas..."):
-                st.session_state["tarifas_verde"] = obter_tarifas("Verde")
-                st.session_state["tarifas_azul"] = obter_tarifas("Azul")
+        st.subheader("Tarifas")
 
-        if "tarifas_verde" in st.session_state and "tarifas_azul" in st.session_state:
-            tarifas_verde = st.session_state["tarifas_verde"]
-            tarifas_azul = st.session_state["tarifas_azul"]
+        origem_tarifas = st.radio(
+            "Origem das tarifas",
+            ["Importar da planilha (ANEEL)", "Inserir manualmente"],
+            key="origem_tarifas",
+            horizontal=True,
+        )
 
-            m1, m2 = st.columns(2)
-            m1.metric("Demanda Fora da Ponta (R$/kW)", f"{tarifas_verde[0]:.2f}")
-            m2.metric("Demanda Ponta Azul (R$/kW)", f"{tarifas_azul[2]:.2f}")
+        if origem_tarifas == "Importar da planilha (ANEEL)":
+            if st.button("Importar tarifas :heavy_dollar_sign:", key="botao_tarifas"):
+                with st.spinner("Importando tarifas..."):
+                    st.session_state["tarifas_verde"] = obter_tarifas("Verde")
+                    st.session_state["tarifas_azul"] = obter_tarifas("Azul")
 
-            m3, m4, m5 = st.columns(3)
-            m3.metric("Consumo Fora da Ponta (R$/kWh)", f"{tarifas_verde[4]:.2f}")
-            m4.metric("Consumo Ponta Verde (R$/kWh)", f"{tarifas_verde[5]:.2f}")
-            m5.metric("Consumo Ponta Azul (R$/kWh)", f"{tarifas_azul[5]:.2f}")
+            if "tarifas_verde" in st.session_state and "tarifas_azul" in st.session_state:
+                tarifas_verde = st.session_state["tarifas_verde"]
+                tarifas_azul = st.session_state["tarifas_azul"]
+
+                m1, m2 = st.columns(2)
+                m1.metric("Demanda Fora da Ponta (R$/kW)", f"{tarifas_verde[0]:.2f}")
+                m2.metric("Demanda Ponta Azul (R$/kW)", f"{tarifas_azul[2]:.2f}")
+
+                m3, m4, m5 = st.columns(3)
+                m3.metric("Consumo Fora da Ponta (R$/kWh)", f"{tarifas_verde[4]:.2f}")
+                m4.metric("Consumo Ponta Verde (R$/kWh)", f"{tarifas_verde[5]:.2f}")
+                m5.metric("Consumo Ponta Azul (R$/kWh)", f"{tarifas_azul[5]:.2f}")
+        else:
+            st.caption(
+                'Digite os valores de tarifa (R$/kW para demanda, R$/kWh para consumo) — use "." como '
+                "separador decimal. Útil quando a concessionária não está na planilha ANEEL ou quando "
+                "você já tem as tarifas da fatura em mãos."
+            )
+            mt1, mt2 = st.columns(2)
+            mt1.number_input("Demanda Fora da Ponta (R$/kW)", min_value=0.0, value=0.0, step=0.01,
+                              format="%.4f", key="man_demanda_fp")
+            mt2.number_input("Demanda Ponta Azul (R$/kW)", min_value=0.0, value=0.0, step=0.01,
+                              format="%.4f", key="man_demanda_ponta_azul")
+
+            mt3, mt4, mt5 = st.columns(3)
+            mt3.number_input("Consumo Fora da Ponta (R$/kWh)", min_value=0.0, value=0.0, step=0.0001,
+                              format="%.4f", key="man_consumo_fp")
+            mt4.number_input("Consumo Ponta Verde (R$/kWh)", min_value=0.0, value=0.0, step=0.0001,
+                              format="%.4f", key="man_consumo_ponta_verde")
+            mt5.number_input("Consumo Ponta Azul (R$/kWh)", min_value=0.0, value=0.0, step=0.0001,
+                              format="%.4f", key="man_consumo_ponta_azul")
 
         st.write("---")
 
@@ -1017,12 +1267,12 @@ with tab_simulacao:
             valor_otimo, demanda_otima_verde, valor_otimo_azul, demanda_otima_azul = \
                 varredura_azul(30, limite_demanda, demanda_contratada_verde, demanda_contratada_azul)
 
-            tarifas_verde = obter_tarifas("Verde")
+            tarifas_verde = obter_tarifas_efetivas("Verde")
             total_verde, gasto_consumo_fp_verde, gasto_consumo_ponta_verde = \
                 gastos_consumo(tarifas_verde, vetor_consumo_fp, vetor_consumo_ponta)
             custo_total_verde = valor_otimo + total_verde
 
-            tarifas_azul = obter_tarifas("Azul")
+            tarifas_azul = obter_tarifas_efetivas("Azul")
             total_azul, gasto_consumo_fp_azul, gasto_consumo_ponta_azul = \
                 gastos_consumo(tarifas_azul, vetor_consumo_fp, vetor_consumo_ponta)
             custo_total_azul = valor_otimo_azul + valor_otimo + total_azul
@@ -1085,3 +1335,30 @@ with tab_simulacao:
         plotar_completo(r["valor_otimo"], r["valor_otimo_azul"], r["gasto_consumo_fp_verde"],
                          r["gasto_consumo_ponta_verde"], r["gasto_consumo_fp_azul"], r["gasto_consumo_ponta_azul"],
                          key="chart_completo_comparativo")
+
+    tem_algum_resultado = (
+        "resultado_verde" in st.session_state
+        or "resultado_azul" in st.session_state
+        or "resultado_completo" in st.session_state
+    )
+
+    if tem_algum_resultado:
+        st.write("---")
+        st.subheader("Relatório em PDF")
+        st.caption(
+            "Gera um PDF com os dados de entrada e os resultados das simulações já calculadas "
+            "nesta sessão (Verde, Azul e/ou Completa), incluindo os gráficos."
+        )
+
+        if st.button("Gerar Relatório PDF :page_facing_up:"):
+            with st.spinner("Gerando PDF..."):
+                st.session_state["relatorio_pdf"] = gerar_relatorio_pdf()
+
+        if "relatorio_pdf" in st.session_state:
+            nome_arquivo = f"relatorio_otimizacao_demanda_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            st.download_button(
+                "Baixar Relatório PDF :arrow_down:",
+                data=st.session_state["relatorio_pdf"],
+                file_name=nome_arquivo,
+                mime="application/pdf",
+            )
