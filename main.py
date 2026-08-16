@@ -1403,7 +1403,7 @@ with tab_simulacao:
     with st.expander(("Como realizar as simulações")):
         st.markdown((
             """
-            O programa realizará as simulações de demanda contratada de acordo com os dados de entrada, exibindo a demanda ótima a ser contratada, a economia anual obtida e os gráficos de otimização.
+            O programa realizará as simulações de demanda contratada de acordo com os dados de entrada, exibindo a demanda ótima a ser contratada, a economia anual obtida e os gráficos de otimização. Após as simulações há possibilidade de exportar um relatório em pdf com as informações da simulação realizada
 
             Existem 3 possibilidades de simulação de acordo com o interesse do usuário:
 
@@ -1413,7 +1413,7 @@ with tab_simulacao:
 
             3. Simulação Completa: Otimização da demanda fora da ponta e na ponta. O programa realiza o cálculo do custo total na modalidade azul e na modalidade verde e exibe a melhor opção.
 
-	Após as simulações há possibilidade de exportar um relatório em pdf com as informações da simulação realizada
+	    
         """
         ))
 
