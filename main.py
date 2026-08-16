@@ -748,10 +748,10 @@ def _extrair_tarifas(banco, sigla_norm, grupo, cor, impostos, descricao_fonte):
 
     except (IndexError, KeyError):
         st.error(
-            f"Não encontrei tarifas (modalidade {cor}) em {descricao_fonte}. Isso normalmente "
-            f"significa que esta concessionária não tem tarifa Grupo A4 publicada nesta fonte. "
-            f"Selecione outra concessionária, tente outra fonte de tarifas ou digite os valores "
-            f"manualmente."
+            f"Não encontrei tarifas (modalidade {cor}, Subgrupo {grupo}) em {descricao_fonte}. Isso "
+            f"normalmente significa que esta concessionária não tem tarifa deste subgrupo publicada "
+            f"nesta fonte. Tente outro subgrupo, outra concessionária, outra fonte de tarifas ou "
+            f"digite os valores manualmente."
         )
         st.stop()
 
@@ -778,15 +778,15 @@ def obter_tarifas(cor, fonte='planilha'):
     conc = concessionaria_selecionada
     sigla = sigla_conc  # Sigla da concessionária
     sigla_norm = normaliza_sigla(sigla)
-    grupo = 'A4'  # seleção do grupo de tarifação
+    grupo = grupo_tarifario  # subgrupo tarifário (A1, A2, A3 ou A4) selecionado pelo usuário
 
     if fonte == 'api':
         try:
             banco = consultar_tarifas_api_aneel(sigla, grupo)
         except RuntimeError as exc:
             st.error(
-                f"Erro ao consultar a API de dados abertos da ANEEL para **{conc}**: {exc}. "
-                f"Tente novamente, use a planilha local ou digite as tarifas manualmente."
+                f"Erro ao consultar a API de dados abertos da ANEEL para **{conc}** (Subgrupo {grupo}): "
+                f"{exc}. Tente novamente, use a planilha local ou digite as tarifas manualmente."
             )
             st.stop()
         descricao_fonte = "API de dados abertos da ANEEL"
@@ -1152,6 +1152,7 @@ def gerar_relatorio_pdf():
             ["Estado", estado_selecionado],
             ["Concessionária", concessionaria_selecionada],
             ["Sigla (base de tarifas)", sigla_conc],
+            ["Subgrupo tarifário (tipo de consumidor)", grupo_tarifario],
             ["Modalidade tarifária selecionada", modalidade],
             ["Origem das tarifas", origem],
         ],
@@ -1296,6 +1297,20 @@ with tab_tarifas:
 
         options_selectbox2 = selecionar_concessionaria(estado_selecionado)
         concessionaria_selecionada = st.selectbox("Selecione a concessionária", options_selectbox2, index=0)
+
+        grupo_tarifario = st.radio(
+            "Tipo de consumidor (subgrupo tarifário)",
+            ["A1", "A2", "A3", "A4"],
+            index=3,
+            horizontal=True,
+            key="grupo_tarifario",
+            help=(
+                "Subgrupo de tensão de fornecimento (A1: ≥230 kV, A2: 88-138 kV, "
+                "A3: 69 kV, A4: 2,3-25 kV). Determina qual tarifa é buscada na "
+                "planilha/API. A maioria das unidades consumidoras atendidas em "
+                "média tensão está no A4."
+            ),
+        )
 
         icms = valor_ICMS(estado_selecionado)
         sigla_conc = definir_sigla(concessionaria_selecionada)
