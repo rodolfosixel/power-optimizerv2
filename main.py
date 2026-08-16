@@ -522,7 +522,7 @@ with st.sidebar:
     st.write("---")
     st.write("Desenvolvido por: Rodolfo Almeida Sixel Juliani")
     st.write("---")
-    st.write("Versão 1.2")
+    st.write("Versão 0.1 (Beta)")
 
 
 
@@ -1335,7 +1335,7 @@ with tab_tarifas:
                 st.caption(
                     "Busca as tarifas homologadas diretamente no portal de dados abertos da ANEEL "
                     "(consulta em tempo real, requer internet). Se a concessionária não for "
-                    "encontrada, tente a planilha com dados de 2025 ou digite as tarifas manualmente."
+                    "encontrada, tente a planilha de 2025 ou digite as tarifas manualmente."
                 )
             else:
                 st.caption(
@@ -1367,7 +1367,7 @@ with tab_tarifas:
                 m5.metric("Consumo Ponta Azul (R$/kWh)", f"{tarifas_azul[5]:.2f}")
         else:
             st.caption(
-                'Digite os valores de tarifa ("R$/kW" para demanda, "R$/kWh" para consumo) — use "." como '
+                'Digite os valores de tarifa (R\\$/kW para demanda, R\\$/kWh para consumo) — use "." como '
                 "separador decimal. Útil quando a concessionária não está na API/planilha da ANEEL ou "
                 "quando você já tem as tarifas da fatura em mãos."
             )
@@ -1412,6 +1412,8 @@ with tab_simulacao:
             2. Simular Azul: Otimização apenas da demanda na ponta.
 
             3. Simulação Completa: Otimização da demanda fora da ponta e na ponta. O programa realiza o cálculo do custo total na modalidade azul e na modalidade verde e exibe a melhor opção.
+
+	Após as simulações há possibilidade de exportar um relatório em pdf com as informações da simulação realizada
         """
         ))
 
