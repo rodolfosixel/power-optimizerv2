@@ -2,3 +2,9 @@ streamlit
 pandas
 plotly
 openpyxl
+reportlab
+requests
+# Fixado em 0.2.1: essa versão do kaleido traz seu próprio Chromium embutido e
+# exporta imagem estática do Plotly sem precisar instalar Chrome no servidor.
+# Versões >= 1.0 exigem Chrome do sistema, o que não está disponível no Streamlit Cloud.
+kaleido==0.2.1
