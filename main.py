@@ -1,10 +1,12 @@
 import io
+import json
 from datetime import datetime
 
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import openpyxl
+import requests
 import unicodedata
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -46,6 +48,110 @@ def carregar_planilha_tarifas(excel_file):
     banco = pd.read_excel(excel_file)
     banco['Sigla_norm'] = banco['Sigla'].apply(normaliza_sigla)
     return banco
+
+
+# --- Integração com a API de dados abertos da ANEEL (CKAN) ---------------
+# Dataset: "Tarifas das distribuidoras de energia elétrica"
+# https://dadosabertos.aneel.gov.br/dataset/tarifas-distribuidoras-energia-eletrica/resource/fcf2906c-7c32-4b9b-a637-054e7a5234f4
+ANEEL_API_URL = "https://dadosabertos.aneel.gov.br/api/3/action/datastore_search"
+ANEEL_RESOURCE_ID = "fcf2906c-7c32-4b9b-a637-054e7a5234f4"
+
+
+def _para_float_br(valor):
+    # Os campos numéricos da API da ANEEL vêm tipados como "text" e podem
+    # usar vírgula como separador decimal (padrão BR). Esta função normaliza
+    # para float de forma defensiva, sem quebrar se o valor já vier limpo.
+    if valor is None:
+        return 0.0
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    texto = str(valor).strip()
+    if texto == "":
+        return 0.0
+    if ',' in texto and '.' in texto:
+        texto = texto.replace('.', '').replace(',', '.')
+    elif ',' in texto:
+        texto = texto.replace(',', '.')
+    try:
+        return float(texto)
+    except ValueError:
+        return 0.0
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def consultar_tarifas_api_aneel(sigla, grupo='A4'):
+    """
+    Consulta em tempo real a API de dados abertos da ANEEL (CKAN) e retorna
+    um DataFrame no mesmo formato usado pela planilha local (colunas:
+    Sigla_norm, Subgrupo, Modalidade, Detalhe, Base Tarifária, Posto,
+    Unidade, TUSD, TE), para que a mesma lógica de extração de tarifas
+    (_extrair_tarifas) possa ser reaproveitada por ambas as fontes.
+
+    A filtragem por concessionária é feita no lado do cliente (usando
+    normaliza_sigla, a mesma função usada para a planilha local), já que um
+    filtro exato e sensível a maiúsculas/acentos no servidor arriscaria
+    retornar zero registros por pequenas diferenças de grafia.
+    """
+    params = {
+        "resource_id": ANEEL_RESOURCE_ID,
+        "filters": json.dumps({"DscSubGrupo": grupo}),
+        "limit": 32000,
+        "offset": 0,
+    }
+
+    registros = []
+    try:
+        while True:
+            resposta = requests.get(ANEEL_API_URL, params=params, timeout=30)
+            resposta.raise_for_status()
+            dados = resposta.json()
+            if not dados.get("success"):
+                raise RuntimeError("a API retornou uma resposta sem sucesso")
+            pagina = dados["result"]["records"]
+            registros.extend(pagina)
+            total = dados["result"].get("total", len(registros))
+            params["offset"] += len(pagina)
+            if not pagina or params["offset"] >= total:
+                break
+    except requests.exceptions.RequestException as exc:
+        raise RuntimeError("não foi possível conectar à API de dados abertos da ANEEL") from exc
+
+    if not registros:
+        raise RuntimeError(f"nenhum registro retornado para o Subgrupo {grupo}")
+
+    banco = pd.DataFrame.from_records(registros)
+    banco['Sigla_norm'] = banco['SigAgente'].apply(normaliza_sigla)
+
+    sigla_norm_alvo = normaliza_sigla(sigla)
+    banco_conc = banco.loc[banco['Sigla_norm'] == sigla_norm_alvo].copy()
+    if banco_conc.empty:
+        raise RuntimeError(f"nenhum registro encontrado para a concessionária '{sigla}'")
+
+    # A base pode conter múltiplas vigências históricas para a mesma
+    # combinação de modalidade/posto/unidade; ficamos apenas com a mais
+    # recente (maior DatInicioVigencia).
+    banco_conc['DatInicioVigencia'] = pd.to_datetime(banco_conc['DatInicioVigencia'], errors='coerce')
+    banco_conc = banco_conc.sort_values('DatInicioVigencia', ascending=False)
+    chave = ['DscModalidadeTarifaria', 'DscDetalhe', 'DscBaseTarifaria', 'NomPostoTarifario',
+             'DscUnidadeTerciaria']
+    banco_conc = banco_conc.drop_duplicates(subset=chave, keep='first')
+
+    banco_conc['TUSD'] = banco_conc['VlrTUSD'].apply(_para_float_br)
+    banco_conc['TE'] = banco_conc['VlrTE'].apply(_para_float_br)
+
+    banco_final = banco_conc.rename(columns={
+        'DscSubGrupo': 'Subgrupo',
+        'DscModalidadeTarifaria': 'Modalidade',
+        'DscDetalhe': 'Detalhe',
+        'DscBaseTarifaria': 'Base Tarifária',
+        'NomPostoTarifario': 'Posto',
+        'DscUnidadeTerciaria': 'Unidade',
+    })
+
+    colunas = ['Sigla_norm', 'Subgrupo', 'Modalidade', 'Detalhe', 'Base Tarifária', 'Posto', 'Unidade',
+               'TUSD', 'TE']
+    return banco_final[colunas]
+
 
 if "disabled" not in st.session_state:
     st.session_state.disabled = False
@@ -519,23 +625,14 @@ demanda_maxima = max(vetor_demanda_fp)
 limite_demanda = 4*demanda_maxima
 
 
-def obter_tarifas(cor):
-    pis_cofins = 0.08  # valor padronizado de PIS e COFINS
-    estado = estado_selecionado  # estado selecionado pelo usuario
-    icms = valor_ICMS(estado)  # valor do ICMS para o estado selecionado
-
-    impostos = round(pis_cofins + icms, 2)  # valor de impostos total
-
-    impostos = 0
-
-    conc = concessionaria_selecionada
-    sigla = sigla_conc  # Sigla da concessionária
-    sigla_norm = normaliza_sigla(sigla)
-    grupo = 'A4'  # seleção do grupo de tarifação
-    # excel_file = 'Tarifas_atualizadas.xlsx'  # Nome da planilha padrão
-    excel_file = 'Tarifas_Teste_2025.xlsx'
-    banco = carregar_planilha_tarifas(excel_file)
-
+def _extrair_tarifas(banco, sigla_norm, grupo, cor, impostos, descricao_fonte):
+    """
+    Lógica compartilhada de extração de tarifas (TUSD + TE) a partir de um
+    DataFrame de tarifas. Reutilizada tanto pela planilha local quanto pela
+    API da ANEEL, que alimentam `banco` já no mesmo formato de colunas
+    (Sigla_norm, Subgrupo, Modalidade, Detalhe, Base Tarifária, Posto,
+    Unidade, TUSD, TE).
+    """
     try:
         if cor == 'Verde':
             # filtro para concessionária, grupo e modalidade tarifária
@@ -618,10 +715,10 @@ def obter_tarifas(cor):
 
     except (IndexError, KeyError):
         st.error(
-            f"Não encontrei tarifas para **{conc}** (modalidade {cor}) na base de dados atual "
-            f"(`{excel_file}`). Isso normalmente significa que esta concessionária não tem tarifa "
-            f"Grupo A4 publicada nesta planilha. Selecione outra concessionária ou atualize a "
-            f"planilha de tarifas."
+            f"Não encontrei tarifas (modalidade {cor}) em {descricao_fonte}. Isso normalmente "
+            f"significa que esta concessionária não tem tarifa Grupo A4 publicada nesta fonte. "
+            f"Selecione outra concessionária, tente outra fonte de tarifas ou digite os valores "
+            f"manualmente."
         )
         st.stop()
 
@@ -631,12 +728,51 @@ def obter_tarifas(cor):
     return tarifas
 
 
+def obter_tarifas(cor, fonte='planilha'):
+    """
+    Obtém as tarifas (TUSD + TE) para a modalidade `cor`, a partir da fonte
+    escolhida: 'planilha' (arquivo Excel local) ou 'api' (API de dados
+    abertos da ANEEL, consultada em tempo real).
+    """
+    pis_cofins = 0.08  # valor padronizado de PIS e COFINS
+    estado = estado_selecionado  # estado selecionado pelo usuario
+    icms = valor_ICMS(estado)  # valor do ICMS para o estado selecionado
+
+    impostos = round(pis_cofins + icms, 2)  # valor de impostos total
+
+    impostos = 0
+
+    conc = concessionaria_selecionada
+    sigla = sigla_conc  # Sigla da concessionária
+    sigla_norm = normaliza_sigla(sigla)
+    grupo = 'A4'  # seleção do grupo de tarifação
+
+    if fonte == 'api':
+        try:
+            banco = consultar_tarifas_api_aneel(sigla, grupo)
+        except RuntimeError as exc:
+            st.error(
+                f"Erro ao consultar a API de dados abertos da ANEEL para **{conc}**: {exc}. "
+                f"Tente novamente, use a planilha local ou digite as tarifas manualmente."
+            )
+            st.stop()
+        descricao_fonte = "API de dados abertos da ANEEL"
+    else:
+        excel_file = 'Tarifas_Teste_2025.xlsx'
+        banco = carregar_planilha_tarifas(excel_file)
+        descricao_fonte = f"planilha local (`{excel_file}`)"
+
+    return _extrair_tarifas(banco, sigla_norm, grupo, cor, impostos, descricao_fonte)
+
+
 def obter_tarifas_efetivas(cor):
     # Ponto único usado por todos os cálculos (custo atual, varreduras e simulações).
-    # Decide se as tarifas vêm da planilha ANEEL (obter_tarifas) ou dos campos digitados
-    # manualmente pelo usuário na aba "Tarifas e Situação Atual", conforme a opção
-    # "Origem das tarifas" selecionada ali.
-    if st.session_state.get("origem_tarifas") == "Inserir manualmente":
+    # Decide se as tarifas vêm da API da ANEEL, da planilha local ou dos campos
+    # digitados manualmente pelo usuário na aba "Tarifas e Situação Atual",
+    # conforme a opção "Origem das tarifas" selecionada ali.
+    origem = st.session_state.get("origem_tarifas")
+
+    if origem == "Inserir manualmente":
         demanda_fp = st.session_state.get("man_demanda_fp", 0.0) or 0.0
         demanda_ponta_azul = st.session_state.get("man_demanda_ponta_azul", 0.0) or 0.0
         consumo_fp = st.session_state.get("man_consumo_fp", 0.0) or 0.0
@@ -651,7 +787,10 @@ def obter_tarifas_efetivas(cor):
         else:
             return [0, 0, 0, 0, 0, 0]
 
-    return obter_tarifas(cor)
+    if origem == "API da ANEEL (tempo real)":
+        return obter_tarifas(cor, fonte='api')
+
+    return obter_tarifas(cor, fonte='planilha')
 
 
 def custo_atual():
@@ -974,7 +1113,7 @@ def gerar_relatorio_pdf():
 
     # --- Dados de entrada ---
     story.append(Paragraph("Dados de Entrada", styles["Heading2"]))
-    origem = st.session_state.get("origem_tarifas", "Importar da planilha (ANEEL)")
+    origem = st.session_state.get("origem_tarifas", "API da ANEEL (tempo real)")
     tabela_info = Table(
         [
             ["Estado", estado_selecionado],
@@ -1092,8 +1231,8 @@ with tab_tarifas:
 
             3. Selecionar o estado e a concessionária de interesse
 
-            4. Obter as tarifas: importar automaticamente (botão "Importar tarifas") ou, se preferir,
-            selecionar "Inserir manualmente" e digitar os valores diretamente
+            4. Obter as tarifas: escolha a origem ("API da ANEEL", "Planilha de 2025" ou
+            "Inserir manualmente") e, se aplicável, clique em "Importar tarifas"
 
             5. Calcular o gasto anual (botão "Calcular gasto anual") atual da unidade consumidora
         """
@@ -1135,18 +1274,38 @@ with tab_tarifas:
 
         origem_tarifas = st.radio(
             "Origem das tarifas",
-            ["Importar da planilha (ANEEL)", "Inserir manualmente"],
+            ["API da ANEEL (tempo real)", "Planilha de 2025", "Inserir manualmente"],
             key="origem_tarifas",
             horizontal=True,
         )
 
-        if origem_tarifas == "Importar da planilha (ANEEL)":
-            if st.button("Importar tarifas :heavy_dollar_sign:", key="botao_tarifas"):
-                with st.spinner("Importando tarifas..."):
-                    st.session_state["tarifas_verde"] = obter_tarifas("Verde")
-                    st.session_state["tarifas_azul"] = obter_tarifas("Azul")
+        if origem_tarifas in ("API da ANEEL (tempo real)", "Planilha de 2025"):
+            fonte = "api" if origem_tarifas == "API da ANEEL (tempo real)" else "planilha"
+            rotulo_fonte = "API da ANEEL" if fonte == "api" else "planilha local"
 
-            if "tarifas_verde" in st.session_state and "tarifas_azul" in st.session_state:
+            if fonte == "api":
+                st.caption(
+                    "Busca as tarifas homologadas diretamente no portal de dados abertos da ANEEL "
+                    "(consulta em tempo real, requer internet). Se a concessionária não for "
+                    "encontrada, tente a planilha de 2025 ou digite as tarifas manualmente."
+                )
+            else:
+                st.caption(
+                    "Usa a planilha de tarifas de 2025 já incluída no aplicativo, sem depender de "
+                    "conexão com a internet."
+                )
+
+            if st.button("Importar tarifas :heavy_dollar_sign:", key="botao_tarifas"):
+                with st.spinner(f"Importando tarifas ({rotulo_fonte})..."):
+                    st.session_state["tarifas_verde"] = obter_tarifas("Verde", fonte=fonte)
+                    st.session_state["tarifas_azul"] = obter_tarifas("Azul", fonte=fonte)
+                    st.session_state["tarifas_fonte_importada"] = origem_tarifas
+
+            if (
+                "tarifas_verde" in st.session_state
+                and "tarifas_azul" in st.session_state
+                and st.session_state.get("tarifas_fonte_importada") == origem_tarifas
+            ):
                 tarifas_verde = st.session_state["tarifas_verde"]
                 tarifas_azul = st.session_state["tarifas_azul"]
 
@@ -1161,8 +1320,8 @@ with tab_tarifas:
         else:
             st.caption(
                 'Digite os valores de tarifa (R$/kW para demanda, R$/kWh para consumo) — use "." como '
-                "separador decimal. Útil quando a concessionária não está na planilha ANEEL ou quando "
-                "você já tem as tarifas da fatura em mãos."
+                "separador decimal. Útil quando a concessionária não está na API/planilha da ANEEL ou "
+                "quando você já tem as tarifas da fatura em mãos."
             )
             mt1, mt2 = st.columns(2)
             mt1.number_input("Demanda Fora da Ponta (R$/kW)", min_value=0.0, value=0.0, step=0.01,
