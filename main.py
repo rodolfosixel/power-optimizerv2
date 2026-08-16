@@ -522,7 +522,7 @@ with st.sidebar:
     st.write("---")
     st.write("Desenvolvido por: Rodolfo Almeida Sixel Juliani")
     st.write("---")
-    st.write("Versão 0.1 (Beta)")
+    st.write("Versão 1.2")
 
 
 
