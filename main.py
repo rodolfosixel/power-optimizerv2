@@ -78,6 +78,44 @@ def _para_float_br(valor):
         return 0.0
 
 
+# A API pública da ANEEL parece bloquear clientes sem um User-Agent de
+# navegador (o mesmo domínio já recusa robôs via robots.txt em /api/), então
+# enviamos cabeçalhos que imitam um navegador comum para reduzir a chance de
+# um bloqueio silencioso (403) do lado do servidor.
+ANEEL_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
+
+
+def _buscar_registros_aneel(filtros, timeout=45, limit=32000):
+    # Busca (com paginação) todos os registros do datastore_search da ANEEL
+    # que casam com `filtros` (dict aplicado como filtro exato server-side).
+    params = {
+        "resource_id": ANEEL_RESOURCE_ID,
+        "filters": json.dumps(filtros),
+        "limit": limit,
+        "offset": 0,
+    }
+    registros = []
+    while True:
+        resposta = requests.get(ANEEL_API_URL, params=params, headers=ANEEL_REQUEST_HEADERS, timeout=timeout)
+        resposta.raise_for_status()
+        dados = resposta.json()
+        if not dados.get("success"):
+            raise RuntimeError("a API retornou uma resposta sem sucesso")
+        pagina = dados["result"]["records"]
+        registros.extend(pagina)
+        total = dados["result"].get("total", len(registros))
+        params["offset"] += len(pagina)
+        if not pagina or params["offset"] >= total:
+            break
+    return registros
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def consultar_tarifas_api_aneel(sigla, grupo='A4'):
     """
@@ -87,34 +125,29 @@ def consultar_tarifas_api_aneel(sigla, grupo='A4'):
     Unidade, TUSD, TE), para que a mesma lógica de extração de tarifas
     (_extrair_tarifas) possa ser reaproveitada por ambas as fontes.
 
-    A filtragem por concessionária é feita no lado do cliente (usando
-    normaliza_sigla, a mesma função usada para a planilha local), já que um
-    filtro exato e sensível a maiúsculas/acentos no servidor arriscaria
-    retornar zero registros por pequenas diferenças de grafia.
+    Estratégia em duas etapas para equilibrar velocidade e robustez:
+    1) tenta um filtro exato no servidor por SigAgente + Subgrupo (rápido,
+       baixo volume de dados);
+    2) se isso não retornar nada (ex.: diferença de maiúsculas/acentos entre
+       a Sigla usada aqui e o valor exato de SigAgente na API), busca todos
+       os registros do Subgrupo e filtra no lado do cliente usando
+       normaliza_sigla — a mesma função usada para a planilha local.
     """
-    params = {
-        "resource_id": ANEEL_RESOURCE_ID,
-        "filters": json.dumps({"DscSubGrupo": grupo}),
-        "limit": 32000,
-        "offset": 0,
-    }
-
+    erro_rede = None
     registros = []
     try:
-        while True:
-            resposta = requests.get(ANEEL_API_URL, params=params, timeout=30)
-            resposta.raise_for_status()
-            dados = resposta.json()
-            if not dados.get("success"):
-                raise RuntimeError("a API retornou uma resposta sem sucesso")
-            pagina = dados["result"]["records"]
-            registros.extend(pagina)
-            total = dados["result"].get("total", len(registros))
-            params["offset"] += len(pagina)
-            if not pagina or params["offset"] >= total:
-                break
+        registros = _buscar_registros_aneel({"SigAgente": sigla, "DscSubGrupo": grupo})
     except requests.exceptions.RequestException as exc:
-        raise RuntimeError("não foi possível conectar à API de dados abertos da ANEEL") from exc
+        erro_rede = exc
+    except (ValueError, KeyError):
+        registros = []
+
+    if not registros:
+        try:
+            registros = _buscar_registros_aneel({"DscSubGrupo": grupo})
+        except requests.exceptions.RequestException as exc:
+            detalhe = str(exc) or str(erro_rede) or "erro desconhecido de conexão"
+            raise RuntimeError(f"não foi possível conectar à API de dados abertos da ANEEL ({detalhe})") from exc
 
     if not registros:
         raise RuntimeError(f"nenhum registro retornado para o Subgrupo {grupo}")
