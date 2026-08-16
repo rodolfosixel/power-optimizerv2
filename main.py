@@ -1398,7 +1398,7 @@ with tab_tarifas:
 
 
 with tab_simulacao:
-    st.header("""Simulação e Resultados :bar_chart: :moneybag:""")
+    st.header("Simulação e Resultados 📊 💰")
 
     with st.expander(("Como realizar as simulações")):
         st.markdown((
@@ -1416,9 +1416,9 @@ with tab_simulacao:
         ))
 
     col_verde, col_azul, col_completo = st.columns(3)
-    simular_verde = col_verde.button("Simular Verde :large_green_square:", width='stretch')
-    simular_azul = col_azul.button("Simular Azul :large_blue_square:", width='stretch')
-    simular_completo = col_completo.button("Simular Completo :heavy_check_mark:", type="primary",
+    simular_verde = col_verde.button("Simular Verde 🟢", width='stretch')
+    simular_azul = col_azul.button("Simular Azul 🔵", width='stretch')
+    simular_completo = col_completo.button("Simular Completo ✅", type="primary",
                                             width='stretch')
 
     if simular_verde:
@@ -1436,13 +1436,14 @@ with tab_simulacao:
 
     if "resultado_verde" in st.session_state:
         r = st.session_state["resultado_verde"]
-        st.write("---")
-        st.subheader("Resultado: Modalidade Verde")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Valor ótimo", f"R$ {money_format(round(r['valor_otimo'], 2))}")
-        c2.metric("Demanda sugerida (fora da ponta)", f"{r['demanda_otima']} kW")
-        c3.metric("Economia anual", f"R$ {money_format(round(r['economia'], 2))}", delta=round(r['economia'], 2))
-        plotar_verde(r["demanda_contratada"], r["demanda_otima"], r["demanda_fp"])
+        with st.container(border=True):
+            st.subheader("Resultado: Modalidade Verde 🟢")
+            c1, c2 = st.columns(2)
+            c1.metric("Valor ótimo", f"R$ {money_format(round(r['valor_otimo'], 2))}")
+            c2.metric("Demanda sugerida (fora da ponta)", f"{r['demanda_otima']} kW")
+            st.metric("💰 Economia anual estimada", f"R$ {money_format(round(r['economia'], 2))}",
+                      delta=round(r['economia'], 2))
+            plotar_verde(r["demanda_contratada"], r["demanda_otima"], r["demanda_fp"])
 
     if simular_azul:
         with st.spinner("Calculando a demanda ótima (Modalidade Azul)..."):
@@ -1461,13 +1462,14 @@ with tab_simulacao:
 
     if "resultado_azul" in st.session_state:
         r = st.session_state["resultado_azul"]
-        st.write("---")
-        st.subheader("Resultado: Modalidade Azul")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Valor ótimo", f"R$ {money_format(round(r['valor_otimo_azul'], 2))}")
-        c2.metric("Demanda sugerida (ponta)", f"{r['demanda_otima_azul']} kW")
-        c3.metric("Economia anual", f"R$ {money_format(round(r['economia'], 2))}", delta=round(r['economia'], 2))
-        plotar_azul(r["demanda_contratada_azul"], r["demanda_otima_azul"], r["demanda_ponta"])
+        with st.container(border=True):
+            st.subheader("Resultado: Modalidade Azul 🔵")
+            c1, c2 = st.columns(2)
+            c1.metric("Valor ótimo", f"R$ {money_format(round(r['valor_otimo_azul'], 2))}")
+            c2.metric("Demanda sugerida (ponta)", f"{r['demanda_otima_azul']} kW")
+            st.metric("💰 Economia anual estimada", f"R$ {money_format(round(r['economia'], 2))}",
+                      delta=round(r['economia'], 2))
+            plotar_azul(r["demanda_contratada_azul"], r["demanda_otima_azul"], r["demanda_ponta"])
 
     if simular_completo:
         with st.spinner("Calculando comparação completa (Verde x Azul)..."):
@@ -1519,29 +1521,29 @@ with tab_simulacao:
 
     if "resultado_completo" in st.session_state:
         r = st.session_state["resultado_completo"]
-        st.write("---")
-        st.subheader("Resultado: Comparação Completa")
+        with st.container(border=True):
+            st.subheader("Resultado: Comparação Completa ✅")
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Custo Atual", f"R$ {money_format(round(r['custo_soma'], 2))}")
-        c2.metric("Valor Total Verde", f"R$ {money_format(round(r['custo_total_verde'], 2))}")
-        c3.metric("Valor Total Azul", f"R$ {money_format(round(r['custo_total_azul'], 2))}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Custo Atual", f"R$ {money_format(round(r['custo_soma'], 2))}")
+            c2.metric("Valor Total Verde", f"R$ {money_format(round(r['custo_total_verde'], 2))}")
+            c3.metric("Valor Total Azul", f"R$ {money_format(round(r['custo_total_azul'], 2))}")
 
-        c4, c5, c6 = st.columns(3)
-        c4.metric("Demanda Ótima Fora da Ponta", f"{r['demanda_otima_verde']} kW")
-        c5.metric("Demanda Ótima na Ponta", f"{r['demanda_sugerida_ponta']} kW")
-        c6.metric("Modalidade Sugerida", r["modalidade_sugerida"])
+            c4, c5, c6 = st.columns(3)
+            c4.metric("Demanda Ótima Fora da Ponta", f"{r['demanda_otima_verde']} kW")
+            c5.metric("Demanda Ótima na Ponta", f"{r['demanda_sugerida_ponta']} kW")
+            c6.metric("Modalidade Sugerida", r["modalidade_sugerida"])
 
-        st.metric("Economia anual estimada", f"R$ {money_format(round(r['economia'], 2))}",
-                   delta=round(r['economia'], 2))
+            st.metric("💰 Economia anual estimada", f"R$ {money_format(round(r['economia'], 2))}",
+                       delta=round(r['economia'], 2))
 
-        plotar_verde(r["demanda_contratada_verde"], r["demanda_otima_verde"], r["demanda_fp"],
-                     key="chart_completo_verde")
-        plotar_azul(r["demanda_contratada_azul"], r["demanda_otima_azul"], r["demanda_ponta"],
-                    key="chart_completo_azul")
-        plotar_completo(r["valor_otimo"], r["valor_otimo_azul"], r["gasto_consumo_fp_verde"],
-                         r["gasto_consumo_ponta_verde"], r["gasto_consumo_fp_azul"], r["gasto_consumo_ponta_azul"],
-                         key="chart_completo_comparativo")
+            plotar_verde(r["demanda_contratada_verde"], r["demanda_otima_verde"], r["demanda_fp"],
+                         key="chart_completo_verde")
+            plotar_azul(r["demanda_contratada_azul"], r["demanda_otima_azul"], r["demanda_ponta"],
+                        key="chart_completo_azul")
+            plotar_completo(r["valor_otimo"], r["valor_otimo_azul"], r["gasto_consumo_fp_verde"],
+                             r["gasto_consumo_ponta_verde"], r["gasto_consumo_fp_azul"],
+                             r["gasto_consumo_ponta_azul"], key="chart_completo_comparativo")
 
     tem_algum_resultado = (
         "resultado_verde" in st.session_state
@@ -1557,14 +1559,14 @@ with tab_simulacao:
             "nesta sessão (Verde, Azul e/ou Completa), incluindo os gráficos."
         )
 
-        if st.button("Gerar Relatório PDF :page_facing_up:"):
+        if st.button("Gerar Relatório PDF 📄"):
             with st.spinner("Gerando PDF..."):
                 st.session_state["relatorio_pdf"] = gerar_relatorio_pdf()
 
         if "relatorio_pdf" in st.session_state:
             nome_arquivo = f"relatorio_otimizacao_demanda_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
             st.download_button(
-                "Baixar Relatório PDF :arrow_down:",
+                "Baixar Relatório PDF ⬇️",
                 data=st.session_state["relatorio_pdf"],
                 file_name=nome_arquivo,
                 mime="application/pdf",
