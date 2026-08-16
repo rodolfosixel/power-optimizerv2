@@ -1335,7 +1335,7 @@ with tab_tarifas:
                 st.caption(
                     "Busca as tarifas homologadas diretamente no portal de dados abertos da ANEEL "
                     "(consulta em tempo real, requer internet). Se a concessionária não for "
-                    "encontrada, tente a planilha de 2025 ou digite as tarifas manualmente."
+                    "encontrada, tente a planilha com dados de 2025 ou digite as tarifas manualmente."
                 )
             else:
                 st.caption(
@@ -1367,7 +1367,7 @@ with tab_tarifas:
                 m5.metric("Consumo Ponta Azul (R$/kWh)", f"{tarifas_azul[5]:.2f}")
         else:
             st.caption(
-                'Digite os valores de tarifa (R$/kW para demanda, R$/kWh para consumo) — use "." como '
+                'Digite os valores de tarifa ("R$/kW" para demanda, "R$/kWh" para consumo) — use "." como '
                 "separador decimal. Útil quando a concessionária não está na API/planilha da ANEEL ou "
                 "quando você já tem as tarifas da fatura em mãos."
             )
